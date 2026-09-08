@@ -183,6 +183,31 @@ npm run dev
 
 前端開發伺服器預設會跑在 `http://localhost:5173`，而且已經設定好將 `/api` 代理到 `http://localhost:8080`。
 
+## 在其他機器用 Docker 跑（推薦流程）
+
+如果目前這台機器無法使用 Docker（例如公司 VM 沒開巢狀虛擬化），可以把程式碼推上 GitHub，換一台有 Docker 的機器操作：
+
+```bash
+# 1. 在任何有 Docker 的機器上（Windows / macOS / Linux 都可以）
+git clone https://github.com/<你的帳號>/<repo名稱>.git
+cd <repo名稱>
+
+# 2. 一鍵建置 + 啟動（會自動 build 前端、打包後端、跑起來）
+docker compose up --build
+
+# 3. 打開瀏覽器
+#    http://localhost:8080
+```
+
+重點說明：
+
+- **新機器完全不用裝 Node / Maven / JDK**——Dockerfile 的多階段建置會在容器裡自己搞定，這正是 Docker 的核心價值
+- H2 資料庫檔案透過 docker-compose 的 named volume 保存，`docker compose down` 再 `up` 資料不會消失
+- 想砍掉重練：`docker compose down -v`（`-v` 會連 volume 一起刪）
+- `data/`、`target/`、`node_modules/` 都已被 `.gitignore` 排除，不會被推上 GitHub
+
+
+
 ## 建議學習順序
 
 1. 先看「新手快速上手地圖」
