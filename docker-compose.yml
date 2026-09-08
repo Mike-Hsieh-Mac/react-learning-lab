@@ -1,0 +1,53 @@
+# ============================================================================
+# docker-compose.yml：用「一個指令」啟動整套服務
+#
+# 沒有 compose 時你要打：
+#   docker build -t react-learning .
+#   docker run -d -p 8080:8080 -v learning-data:/app/data react-learning
+# 有了 compose 只要：
+#   docker compose up -d
+#
+# compose 的價值在「多服務編排」：之後要加 PostgreSQL、Redis，
+# 只要在 services 底下多寫一段，它們會自動在同一個網路裡互相看得見。
+# ============================================================================
+services:
+  app:
+    # build: . 表示用目前資料夾的 Dockerfile 建置映像檔
+    build: .
+    image: react-learning:latest
+    container_name: react-learning
+    ports:
+      # 「主機 port : 容器 port」——瀏覽器打 localhost:8080，
+      # Docker 會轉進容器裡的 8080（Spring Boot）
+      - "8080:8080"
+    volumes:
+      # 具名 volume：把容器的 /app/data（H2 資料庫檔案）存到 Docker 管理的空間。
+      # 容器砍掉重建（docker compose down && up），資料依然都在。
+      # 想徹底清空資料庫才用：docker compose down -v
+      - learning-data:/app/data
+    restart: unless-stopped
+
+  # ---------- 進階練習（先註解起來）：把 H2 換成 PostgreSQL ----------
+  # 步驟：
+  #   1. pom.xml 把 h2 依賴換成 org.postgresql:postgresql
+  #   2. application.properties 的 datasource 4 行換成下面 environment 對應的值
+  #   3. 打開下面的註解，docker compose up -d --build
+  # 這就是「分層的價值」的終極驗證：程式碼一行都不用改。
+  #
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: react-learning-db
+  #   environment:
+  #     POSTGRES_DB: learning_lab
+  #     POSTGRES_USER: learner
+  #     POSTGRES_PASSWORD: learn123
+  #   volumes:
+  #     - pg-data:/var/lib/postgresql/data
+  #   # 注意：容器之間用「服務名稱」當主機名互連，
+  #   # 所以 app 的連線字串會是 jdbc:postgresql://db:5432/learning_lab
+  #   # （db 就是這個服務的名字，不是 localhost！這是新手最常踩的坑）
+
+volumes:
+  learning-data:
+  # pg-data:
+

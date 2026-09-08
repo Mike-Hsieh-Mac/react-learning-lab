@@ -1,0 +1,25 @@
+# .dockerignore：build 時「不要」送進 Docker 的檔案清單
+# 作用和 .gitignore 類似，但目的是：
+#   1. 加速 build（node_modules 上萬個檔案不用複製進去，容器裡會重新 npm ci）
+#   2. 避免污染（本機的 target/、資料庫檔案不該進映像檔）
+#   3. 安全（避免把含機密的檔案打包進去）
+
+# 建置產物（容器裡會重新產生）
+target/
+react_learning_example/node_modules/
+react_learning_example/dist/
+
+# 本機資料庫檔案（資料靠 volume 持久化，不是靠打包進映像檔）
+data/
+
+# 版控與 IDE
+.git/
+.gitignore
+.idea/
+*.iml
+
+# Docker 自己的檔案
+Dockerfile
+docker-compose.yml
+.dockerignore
+
