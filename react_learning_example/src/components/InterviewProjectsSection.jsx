@@ -12,9 +12,11 @@ export default function InterviewProjectsSection({
   onToggleInterviewStep,
   interviewVerifyResults,
   onRunInterviewVerify,
+  selectedProjectId,
+  onSelectProject,
   showcases,
 }) {
-  const [selectedProjectId, setSelectedProjectId] = useState(interviewProjects[0].id)
+  // const [selectedProjectId, setSelectedProjectId] = useState(interviewProjects[0].id)
   const project = interviewProjects.find((item) => item.id === selectedProjectId) ?? interviewProjects[0]
 
   const [stageByProject, setStageByProject] = useState({})
@@ -52,7 +54,7 @@ export default function InterviewProjectsSection({
               key={item.id}
               type="button"
               className={item.id === project.id ? 'backend-lab-card active' : 'backend-lab-card'}
-              onClick={() => setSelectedProjectId(item.id)}
+              onClick={() => onSelectProject(item.id)}
             >
               <span className="hook-badge">面試專案</span>
               <strong>
@@ -213,7 +215,8 @@ export default function InterviewProjectsSection({
           </div>
           <p className="section-note">完成各專案最後一步後，把元件掛上來就會顯示。</p>
         </div>
-        {showcases?.length ? showcases : <p className="demo-tip">目前還是空的：照各專案最後一個 Step 的說明，把元件掛上來吧。</p>}
+        
+        {showcases.find((project) => project.id === selectedProjectId)?.component}
       </div>
     </section>
   )

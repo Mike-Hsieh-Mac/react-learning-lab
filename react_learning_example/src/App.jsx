@@ -10,6 +10,8 @@ import HooksToolboxSection from './components/HooksToolboxSection'
 import JavaBasicsSection from './components/JavaBasicsSection'
 import RenderFlowSection from './components/RenderFlowSection'
 import MyTaskBoard from './components/MyTaskBoard'
+import MyShortLinks from './components/MyShortLinks'
+import MyExpenseTracker from './components/MyExpenseTracker'
 import { javaConceptQuizzes } from './javaPractice'
 import {
   brokenCodeExercises,
@@ -415,6 +417,7 @@ function App() {
     },
   ])
   // Mike新增
+  const [selectedInterviewProjectId, setSelectedInterviewProjectId] = useState('project-shortlink')
   const [visible, setVisible] = useState(false)
   const [ctrTmp, setCtrTmp] = useState(0)
   const [formTmp, setFormTmp] = useState({
@@ -3176,14 +3179,19 @@ function App() {
         onToggleInterviewStep={handleToggleInterviewStep}
         interviewVerifyResults={interviewVerifyResults}
         onRunInterviewVerify={handleRunInterviewVerify}
+        selectedProjectId={selectedInterviewProjectId}
+        onSelectProject={setSelectedInterviewProjectId}
         showcases={[
-          /* ✅ 面試專案成果展示：完成專案後，
-             1. 在檔案最上方 import 你的元件，例如：
-                import MyShortLinks from './components/MyShortLinks'
-                import MyExpenseTracker from './components/MyExpenseTracker'
-             2. 把下面對應的註解打開 */
-          // <MyShortLinks key="shortlinks" />,
-          // <MyExpenseTracker key="expenses" />,
+          //  <MyShortLinks key="shortlinks" />,
+          //  <MyExpenseTracker key="expenses" />,
+          {
+            id: 'project-shortlink',
+            component: <MyShortLinks />
+          },
+          {
+            id: 'project-expense',
+            component: <MyExpenseTracker />
+          }
         ]}
       />
 
