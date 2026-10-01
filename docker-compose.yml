@@ -27,27 +27,59 @@ services:
       - learning-data:/app/data
     restart: unless-stopped
 
-  # ---------- 進階練習（先註解起來）：把 H2 換成 PostgreSQL ----------
-  # 步驟：
-  #   1. pom.xml 把 h2 依賴換成 org.postgresql:postgresql
-  #   2. application.properties 的 datasource 4 行換成下面 environment 對應的值
-  #   3. 打開下面的註解，docker compose up -d --build
-  # 這就是「分層的價值」的終極驗證：程式碼一行都不用改。
-  #
-  # db:
-  #   image: postgres:16-alpine
-  #   container_name: react-learning-db
-  #   environment:
-  #     POSTGRES_DB: learning_lab
-  #     POSTGRES_USER: learner
-  #     POSTGRES_PASSWORD: learn123
-  #   volumes:
-  #     - pg-data:/var/lib/postgresql/data
-  #   # 注意：容器之間用「服務名稱」當主機名互連，
-  #   # 所以 app 的連線字串會是 jdbc:postgresql://db:5432/learning_lab
-  #   # （db 就是這個服務的名字，不是 localhost！這是新手最常踩的坑）
+  # ---------- 16. 串接外部資料庫練習：MySQL ----------
+  # 平常不會啟動（用 profiles 隔開），要練習時才下：
+  #   docker compose --profile mysql up -d
+  # 啟動後 Spring Boot 要用 --spring.profiles.active=mysql 讀取 application-mysql.properties。
+  mysql:
+    image: mysql:8.4
+    container_name: react-learning-mysql
+    profiles: ["mysql"]
+    environment:
+      MYSQL_DATABASE: learning_lab
+      MYSQL_USER: learner
+      MYSQL_PASSWORD: learn123
+      MYSQL_ROOT_PASSWORD: root123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+
+  # ---------- 16. 串接外部資料庫練習：PostgreSQL ----------
+  # 練習時下：docker compose --profile postgres up -d
+  # 啟動後 Spring Boot 要用 --spring.profiles.active=postgres 讀取 application-postgres.properties。
+  postgres:
+    image: postgres:16-alpine
+    container_name: react-learning-postgres
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: learning_lab
+      POSTGRES_USER: learner
+      POSTGRES_PASSWORD: learn123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # 選用：PostgreSQL 的網頁 GUI，方便不裝 DBeaver 也能看資料表。
+  # docker compose --profile postgres up -d 會連 pgadmin 一起啟動。
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: react-learning-pgadmin
+    profiles: ["postgres"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: learner@example.com
+      PGADMIN_DEFAULT_PASSWORD: learn123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
 
 volumes:
   learning-data:
-  # pg-data:
+  mysql-data:
+  pg-data:
 

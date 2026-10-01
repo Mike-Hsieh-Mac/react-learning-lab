@@ -71,6 +71,26 @@ export default function InterviewProjectsSection({
 
       <p>{project.goal}</p>
 
+      {project.conceptExplanation?.length ? (
+        <article className="info-card">
+          <p className="demo-label">先懂觀念，再看程式碼</p>
+          <div className="mini-list">
+            {project.conceptExplanation.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
+        </article>
+      ) : null}
+
+      {project.flowDiagram ? (
+        <article className="info-card">
+          <p className="demo-label">運作流程圖（誰在什麼時候做什麼事）</p>
+          <pre className="mini-code-block capstone-contract">
+            <code>{project.flowDiagram}</code>
+          </pre>
+        </article>
+      ) : null}
+
       <div className="capstone-overview-grid">
         <article className="info-card">
           <p className="demo-label">為什麼適合當面試作品</p>
@@ -215,10 +235,11 @@ export default function InterviewProjectsSection({
           </div>
           <p className="section-note">完成各專案最後一步後，把元件掛上來就會顯示。</p>
         </div>
-        
+
         {showcases.find((project) => project.id === selectedProjectId)?.component}
       </div>
     </section>
   )
 }
+
 

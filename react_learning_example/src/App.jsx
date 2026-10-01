@@ -6,12 +6,14 @@ import BackendLabSection from './components/BackendLabSection'
 import CapstoneProjectSection from './components/CapstoneProjectSection'
 import InterviewProjectsSection from './components/InterviewProjectsSection'
 import DockerSection from './components/DockerSection'
+import ExternalDbSection from './components/ExternalDbSection'
 import HooksToolboxSection from './components/HooksToolboxSection'
 import JavaBasicsSection from './components/JavaBasicsSection'
 import RenderFlowSection from './components/RenderFlowSection'
 import MyTaskBoard from './components/MyTaskBoard'
 import MyShortLinks from './components/MyShortLinks'
 import MyExpenseTracker from './components/MyExpenseTracker'
+import MyAuthPanel from './components/MyAuthPanel'
 import { javaConceptQuizzes } from './javaPractice'
 import {
   brokenCodeExercises,
@@ -53,6 +55,7 @@ const SECTION_LABELS = {
   capstone: '13. 全端小專案實戰',
   interview: '14. 面試級全端專案',
   docker: '15. Docker 容器化實戰',
+  externalDb: '16. 串接外部資料庫',
 }
 
 function readSavedLearningProgress() {
@@ -363,6 +366,8 @@ function App() {
   const [interviewChecks, setInterviewChecks] = useState(() => savedLearningProgress.interviewChecks ?? {})
   const [interviewVerifyResults, setInterviewVerifyResults] = useState(() => savedLearningProgress.interviewVerifyResults ?? {})
   const [dockerChecks, setDockerChecks] = useState(() => savedLearningProgress.dockerChecks ?? {})
+  const [externalDbChecks, setExternalDbChecks] = useState(() => savedLearningProgress.externalDbChecks ?? {})
+  const [selectedExternalDbStackId, setSelectedExternalDbStackId] = useState('extdb-mysql')
   const [scenarioSelections, setScenarioSelections] = useState({})
   const [scenarioFeedback, setScenarioFeedback] = useState({})
   const [brokenCodeSelections, setBrokenCodeSelections] = useState({})
@@ -491,6 +496,7 @@ function App() {
       interviewChecks,
       interviewVerifyResults,
       dockerChecks,
+      externalDbChecks,
       javaQuizResults,
       javaReadingResults,
       quizCorrectMap,
@@ -511,6 +517,7 @@ function App() {
     interviewChecks,
     interviewVerifyResults,
     dockerChecks,
+    externalDbChecks,
     javaQuizResults,
     javaReadingResults,
     brokenCodeFeedback,
@@ -1665,6 +1672,275 @@ function App() {
         )
         return
       }
+
+      if (verifyId === 'verify-auth-flow') {
+        const details = []
+        // 每次驗收都用一個新 username，避免「重複註冊」被之前跑過的資料誤判。
+        const uniqueUser = `interview_${Date.now()}`
+
+        const registerResponse = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: uniqueUser, password: 'Passw0rd!' }),
+        })
+        details.push({
+          label: `POST /api/auth/register 回 201（實際：${registerResponse.status}）`,
+          passed: registerResponse.status === 201,
+        })
+
+        const loginResponse = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: uniqueUser, password: 'Passw0rd!' }),
+        })
+        const loginBody = await safeJson(loginResponse)
+        const loginOk = loginResponse.status === 200 && typeof loginBody?.token === 'string' && loginBody.token.length > 0
+        details.push({
+          label: `POST /api/auth/login 回 200 且有 token（實際：${loginResponse.status}）`,
+          passed: loginOk,
+        })
+
+        if (loginOk) {
+          const meResponse = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${loginBody.token}` },
+          })
+          const meBody = await safeJson(meResponse)
+          details.push({
+            label: `帶 token 打 GET /api/auth/me 回 200 且 username 正確（實際：${meResponse.status}）`,
+            passed: meResponse.status === 200 && meBody?.username === uniqueUser,
+          })
+        } else {
+          details.push({ label: 'GET /api/auth/me（登入失敗，先跳過）', passed: false })
+        }
+
+        const noTokenResponse = await fetch('/api/auth/me')
+        details.push({
+          label: `沒帶 token 打 /api/auth/me 回 401（實際：${noTokenResponse.status}）`,
+          passed: noTokenResponse.status === 401,
+        })
+
+        const duplicateResponse = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: uniqueUser, password: 'Passw0rd!' }),
+        })
+        details.push({
+          label: `重複註冊同一個 username 回 400（實際：${duplicateResponse.status}）`,
+          passed: duplicateResponse.status === 400,
+        })
+
+        const passed = details.every((item) => item.passed)
+        record(
+          passed,
+          passed ? 'JWT 註冊 / 登入 / 保護 API 全部正確！接下來做 React 前端。' : '還差一點，看下面哪一項是 ❌，回去對照參考解答。',
+          details,
+        )
+        return
+      }
+
+      if (verifyId === 'verify-inventory-purchase') {
+        const details = []
+
+        const createResponse = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: '驗收商品', price: 100, stock: 1 }),
+        })
+        const created = await safeJson(createResponse)
+        const createdOk = createResponse.status === 201 && typeof created?.id === 'number'
+        details.push({
+          label: `POST /api/products 回 201（實際：${createResponse.status}）`,
+          passed: createdOk,
+        })
+
+        if (createdOk) {
+          const purchaseResponse = await fetch(`/api/products/${created.id}/purchase`, { method: 'POST' })
+          const purchaseBody = await safeJson(purchaseResponse)
+          details.push({
+            label: `第一次購買回 200 且 stock 變 0（實際：${purchaseResponse.status}，stock=${purchaseBody?.stock}）`,
+            passed: purchaseResponse.status === 200 && purchaseBody?.stock === 0,
+          })
+
+          const secondPurchase = await fetch(`/api/products/${created.id}/purchase`, { method: 'POST' })
+          details.push({
+            label: `庫存歸零後再買一次回 409（實際：${secondPurchase.status}）`,
+            passed: secondPurchase.status === 409,
+          })
+        } else {
+          details.push(
+            { label: '購買庫存（建立商品失敗，先跳過）', passed: false },
+            { label: '庫存歸零後再買一次（建立商品失敗，先跳過）', passed: false },
+          )
+        }
+
+        const pageResponse = await fetch('/api/products?page=0&size=5&sort=price,asc')
+        const pageBody = await safeJson(pageResponse)
+        details.push({
+          label: `分頁查詢回 200 且有 content 陣列（實際：${pageResponse.status}）`,
+          passed: pageResponse.status === 200 && Array.isArray(pageBody?.content),
+        })
+
+        const invalidResponse = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: '不合法商品', price: 0, stock: 1 }),
+        })
+        details.push({
+          label: `price 必須 >= 1 被擋下回 400（實際：${invalidResponse.status}）`,
+          passed: invalidResponse.status === 400,
+        })
+
+        const passed = details.every((item) => item.passed)
+        record(
+          passed,
+          passed ? '分頁排序與樂觀鎖扣庫存都正確！接下來做 React 前端。' : '有幾項還沒過，對照下面清單修正後再驗一次。',
+          details,
+        )
+        return
+      }
+
+      if (verifyId === 'verify-comments-crud') {
+        const details = []
+
+        const createFirst = await fetch('/api/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author: '驗收員A', content: '第一則留言' }),
+        })
+        const firstItem = await safeJson(createFirst)
+        // 兩筆留言之間稍微錯開時間，確保 createdAt 不會剛好一樣，排序才有意義可以驗證。
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const createSecond = await fetch('/api/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author: '驗收員B', content: '第二則留言（應該排最前面）' }),
+        })
+        const secondItem = await safeJson(createSecond)
+        const createdOk =
+          createFirst.status === 201 && typeof firstItem?.id === 'number' &&
+          createSecond.status === 201 && typeof secondItem?.id === 'number'
+        details.push({
+          label: `POST 兩則留言都回 201（實際：${createFirst.status} / ${createSecond.status}）`,
+          passed: createdOk,
+        })
+
+        if (createdOk) {
+          const listResponse = await fetch('/api/comments')
+          const listBody = await safeJson(listResponse)
+          const sortedOk =
+            listResponse.status === 200 && Array.isArray(listBody) && listBody.length >= 2 &&
+            listBody[0]?.id === secondItem.id
+          details.push({
+            label: `GET /api/comments 新到舊排序正確，第一筆是最新留言（實際第一筆 id=${listBody?.[0]?.id}）`,
+            passed: sortedOk,
+          })
+        } else {
+          details.push({ label: '留言排序（建立失敗，先跳過）', passed: false })
+        }
+
+        const invalidResponse = await fetch('/api/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author: '', content: '' }),
+        })
+        details.push({
+          label: `空白 author/content 被 @NotBlank 擋下回 400（實際：${invalidResponse.status}）`,
+          passed: invalidResponse.status === 400,
+        })
+
+        if (createdOk) {
+          const deleteResponse = await fetch(`/api/comments/${firstItem.id}`, { method: 'DELETE' })
+          const afterDeleteList = await safeJson(await fetch('/api/comments'))
+          const stillThere = Array.isArray(afterDeleteList) && afterDeleteList.some((item) => item.id === firstItem.id)
+          details.push({
+            label: `DELETE 回 204 且刪除後列表不再出現該留言（實際：${deleteResponse.status}）`,
+            passed: deleteResponse.status === 204 && !stillThere,
+          })
+        } else {
+          details.push({ label: '刪除留言（建立失敗，先跳過）', passed: false })
+        }
+
+        const passed = details.every((item) => item.passed)
+        record(
+          passed,
+          passed ? '留言排序、驗證與刪除都正確！接下來做 React 前端（也可以挑戰接外部 MySQL）。' : '有幾項還沒過，對照下面清單修正後再驗一次。',
+          details,
+        )
+        return
+      }
+
+      if (verifyId === 'verify-blog-crud') {
+        const details = []
+
+        const createResponse = await fetch('/api/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: '驗收草稿', body: '這篇文章一開始應該是草稿' }),
+        })
+        const created = await safeJson(createResponse)
+        const createdOk = createResponse.status === 201 && typeof created?.id === 'number' && created?.published === false
+        details.push({
+          label: `POST /api/posts 回 201 且預設 published=false（實際：${createResponse.status}，published=${created?.published}）`,
+          passed: createdOk,
+        })
+
+        if (createdOk) {
+          const publishedList = await safeJson(await fetch('/api/posts?published=true'))
+          const notInPublished = Array.isArray(publishedList) && !publishedList.some((item) => item.id === created.id)
+          details.push({
+            label: `草稿不會出現在 ?published=true 列表（實際：${Array.isArray(publishedList) ? publishedList.length : '非陣列'} 筆已發布文章）`,
+            passed: notInPublished,
+          })
+
+          const publishResponse = await fetch(`/api/posts/${created.id}/publish`, { method: 'PATCH' })
+          const publishBody = await safeJson(publishResponse)
+          details.push({
+            label: `PATCH /publish 回 200 且 published 變 true（實際：${publishResponse.status}，published=${publishBody?.published}）`,
+            passed: publishResponse.status === 200 && publishBody?.published === true,
+          })
+
+          const publishedListAfter = await safeJson(await fetch('/api/posts?published=true'))
+          const nowInPublished = Array.isArray(publishedListAfter) && publishedListAfter.some((item) => item.id === created.id)
+          details.push({
+            label: `發布後該文章出現在 ?published=true 列表（實際：${nowInPublished}）`,
+            passed: nowInPublished,
+          })
+        } else {
+          details.push(
+            { label: '草稿不在已發布列表（建立失敗，先跳過）', passed: false },
+            { label: 'PATCH /publish（建立失敗，先跳過）', passed: false },
+            { label: '發布後出現在已發布列表（建立失敗，先跳過）', passed: false },
+          )
+        }
+
+        const invalidResponse = await fetch('/api/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: '', body: '' }),
+        })
+        details.push({
+          label: `空白 title/body 被 @NotBlank 擋下回 400（實際：${invalidResponse.status}）`,
+          passed: invalidResponse.status === 400,
+        })
+
+        if (createdOk) {
+          const deleteResponse = await fetch(`/api/posts/${created.id}`, { method: 'DELETE' })
+          details.push({
+            label: `DELETE 回 204（實際：${deleteResponse.status}）`,
+            passed: deleteResponse.status === 204,
+          })
+        } else {
+          details.push({ label: '刪除文章（建立失敗，先跳過）', passed: false })
+        }
+
+        const passed = details.every((item) => item.passed)
+        record(
+          passed,
+          passed ? '草稿/發布流程、驗證與刪除都正確！接下來做 React 前端（也可以挑戰接外部 PostgreSQL）。' : '有幾項還沒過，對照下面清單修正後再驗一次。',
+          details,
+        )
+        return
+      }
     } catch (verifyError) {
       record(false, `驗收執行失敗：${verifyError.message}（請確認 Spring Boot 有啟動，而且改完 Java 有重啟）`, [])
     }
@@ -1675,6 +1951,10 @@ function App() {
   // ------------------------------------------------------------------
   const handleToggleDockerStep = (stepId) => {
     setDockerChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
+  }
+
+  const handleToggleExternalDbStep = (stepId) => {
+    setExternalDbChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
   }
 
   // ------------------------------------------------------------------
@@ -3191,6 +3471,10 @@ function App() {
           {
             id: 'project-expense',
             component: <MyExpenseTracker />
+          },
+          {
+            id: 'project-auth',
+            component: <MyAuthPanel />
           }
         ]}
       />
@@ -3199,6 +3483,14 @@ function App() {
         registerSectionRef={registerSectionRef}
         dockerChecks={dockerChecks}
         onToggleDockerStep={handleToggleDockerStep}
+      />
+
+      <ExternalDbSection
+        registerSectionRef={registerSectionRef}
+        externalDbChecks={externalDbChecks}
+        onToggleExternalDbStep={handleToggleExternalDbStep}
+        selectedStackId={selectedExternalDbStackId}
+        onSelectStack={setSelectedExternalDbStackId}
       />
 
       <nav className="floating-nav" aria-label="快速導覽">

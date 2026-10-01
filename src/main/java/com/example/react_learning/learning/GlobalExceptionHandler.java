@@ -3,6 +3,7 @@ package com.example.react_learning.learning;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -75,6 +76,13 @@ public class GlobalExceptionHandler {
                 fieldError.getField(),
                 fieldError.getDefaultMessage() != null ? fieldError.getDefaultMessage() : "欄位驗證失敗"
         );
+    }
+    // 建議加在 GlobalExceptionHandler 裡，跟其他例外處理放在一起：
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        ApiErrorResponse body = new ApiErrorResponse(
+                409, "STOCK_CONFLICT", "商品剛被搶購，請重新整理再試一次。", null, Instant.now(), List.of());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 }
 

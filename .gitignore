@@ -35,9 +35,13 @@ build/
 ### H2 database files (local data, do not commit) ###
 data/
 
+### Stray local run logs ###
+run*.log
+
 ### Frontend (React / Vite) ###
 node_modules/
 react_learning_example/dist/
 npm-debug.log*
 *.local
+
 

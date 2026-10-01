@@ -1,4 +1,4 @@
-export const fallbackArchitectureSteps = [
+﻿export const fallbackArchitectureSteps = [
   '使用者先在 React 畫面操作按鈕或輸入欄位。',
   'React 透過 useState 保存畫面狀態，狀態改變就重新渲染。',
   '當畫面邏輯變複雜時，React 會搭配 useEffect、useMemo、useCallback、useRef 等 hooks。',
@@ -3786,6 +3786,1534 @@ export default function MyExpenseTracker() {
       },
     ],
   },
+  {
+    id: 'project-auth',
+    title: '會員登入系統（JWT 驗證）',
+    subtitle: '幾乎每個後端職缺都會考的認證機制，從密碼加密到保護 API 一次搞懂',
+    goal: '做出「註冊 → 登入拿 token → 帶 token 呼叫受保護 API」的完整流程，體會 Spring Security 怎麼攔截請求做身分驗證。',
+    interviewValue: [
+      '認證/授權幾乎是後端面試必考主題，能講清楚「無狀態 token」跟「session」的差異就是加分題。',
+      '密碼用 BCrypt 雜湊示範最基本的資安常識：資料庫裡絕對不能出現明文密碼。',
+      'Spring Security 的 Filter Chain 是「請求怎麼被攔截檢查」的經典追問題，做過一次印象會很深。',
+    ],
+    apiContract: [
+      'POST /api/auth/register -> 201，註冊（username 不可重複，密碼會被雜湊後存）；重複 username 回 400',
+      'POST /api/auth/login    -> 200，登入成功回傳 { token }；帳密錯誤回 401',
+      'GET  /api/auth/me       -> 200，需帶 Authorization: Bearer <token>；沒帶或 token 無效回 401',
+    ],
+    conceptExplanation: [
+      '先用生活比喻理解，再看程式碼會輕鬆很多：JWT token 就像一張「有防偽簽章的識別證」。你去警衛室（login）證明身分後，警衛（後端）發給你一張識別證（token），上面寫著你的名字，還蓋了一個只有警衛室才做得出來的防偽章（簽章）。之後你想進任何房間（受保護的 API），只要出示這張識別證，警衛掃一下防偽章確認沒被偽造、也還沒過期，就放行——警衛完全不需要記得「誰進來過」，這就是「無狀態（stateless）」的意思。',
+      '整個練習其實只有 3 個角色在合作：AuthController/AuthService（負責「核發識別證」：註冊、登入）、JwtUtil（負責「做出防偽章」與「驗證防偽章」：產生/解析 token）、JwtAuthFilter + SecurityConfig（負責「站在每個房間門口的警衛」：每個請求進來前先檢查有沒有帶識別證，帶了就放行）。新手常卡住的地方，就是分不清楚這三者各自的職責邊界，下面用流程圖把「誰在什麼時間點做什麼事」畫出來。',
+      '特別提醒 Stage 3 的兩個常見地雷：① JwtAuthFilter 沒有加 @Component，Spring 就不會把它當成 Bean，SecurityConfig 會直接啟動失敗（報錯 required a bean of type JwtAuthFilter that could not be found）。② 沒有自訂 AuthenticationEntryPoint 的話，「沒帶 token / token 失效」預設會回 403，而不是 apiContract 要求的 401——因為 Spring Security 在沒有 httpBasic()/formLogin() 的情況下，找不到「該怎麼引導使用者登入」，只好用最保守的 403 打發，所以要自己指定一個 entry point 直接回 401。',
+    ],
+    flowDiagram: `【流程 1】註冊 — 使用者第一次建立帳號
+瀏覽器                AuthController         AuthService              資料庫
+  │  POST /register        │                      │                     │
+  │  {username,password}   │                      │                     │
+  ├────────────────────────▶                      │                     │
+  │                        │  authService.register()                    │
+  │                        ├─────────────────────▶│                     │
+  │                        │                      │ 1. 查 username 是否已存在
+  │                        │                      ├────────────────────▶│
+  │                        │                      │◀────────────────────┤
+  │                        │                      │ 2. 用 BCrypt 把明文密碼加密
+  │                        │                      │    （資料庫永遠不存明文密碼）
+  │                        │                      │ 3. 存進 app_users 表
+  │                        │                      ├────────────────────▶│
+  │◀───────────── 201 Created ───────────────────┤                     │
+
+【流程 2】登入 — 拿到那張「識別證」(JWT token)
+瀏覽器                AuthController         AuthService     JwtUtil
+  │  POST /login            │                      │           │
+  │  {username,password}    │                      │           │
+  ├─────────────────────────▶                      │           │
+  │                         ├─────────────────────▶│           │
+  │                         │             1. 依 username 撈出使用者
+  │                         │             2. encoder.matches(明文, 資料庫雜湊值)
+  │                         │                比對成功才繼續，否則丟 401
+  │                         │             3. jwtUtil.generateToken(username)
+  │                         │                      ├──────────▶│
+  │                         │                      │  簽出 token（帶 username
+  │                         │                      │  + 簽發時間 + 過期時間 +
+  │                         │                      │  只有伺服器知道的密鑰簽章）
+  │                         │                      │◀──────────┤
+  │◀──────── 200 { token: "xxx.yyy.zzz" } ─────────┤           │
+  │  （前端把 token 存進 state / localStorage，下次請求要自己帶著）
+
+【流程 3】帶著 token 呼叫受保護的 API（/me）— 警衛怎麼檢查
+瀏覽器                JwtAuthFilter                      JwtUtil        SecurityConfig 規則      AuthController
+  │  GET /me                  │                              │                 │                     │
+  │  Header:                  │                               │                │                     │
+  │  Authorization:            │                              │                │                     │
+  │  Bearer xxx.yyy.zzz        │                              │                │                     │
+  ├───────────────────────────▶                              │                │                     │
+  │                            │ 1. 取出 "Bearer " 後面的 token │                │                     │
+  │                            │ 2. jwtUtil.extractUsername(token)             │                     │
+  │                            ├─────────────────────────────▶│                │                     │
+  │                            │        驗簽章 + 驗有沒有過期     │                │                     │
+  │                            │◀─────────────────────────────┤                │                     │
+  │                            │ 3a. 成功 → 把 username 放進     │                │                     │
+  │                            │     SecurityContext（等於在   │                │                     │
+  │                            │     這次請求上貼「已驗證」標籤） │                │                     │
+  │                            │ 3b. 失敗 → 不貼標籤，直接放行   │                │                     │
+  │                            │     （讓下一關的規則來擋）      │                │                     │
+  │                            ├───────────────────────────────────────────────▶│                     │
+  │                            │           4. 檢查這條路徑的規則：                 │                     │
+  │                            │              /api/auth/** 要求 authenticated()  │                     │
+  │                            │           5a. 有「已驗證」標籤 → 放行 ─────────────────────────────────▶│
+  │                            │                                                │        執行 me()，回 200
+  │                            │           5b. 沒有標籤 → 呼叫 AuthenticationEntryPoint         │
+  │◀──────────────────────────────────────── 直接回 401（不會進到 Controller）──┤                     │
+
+一句話總結三個角色：
+  AuthService  = 發識別證的「櫃檯」（只在 register / login 時工作一次）
+  JwtUtil      = 做防偽章 + 驗防偽章的「印刷機」（產生 token、解析 token）
+  JwtAuthFilter + SecurityConfig = 站在每道門口的「警衛」（每一個請求都會先經過這裡檢查）`,
+    stages: [
+      {
+        id: 'auth-stage-setup',
+        phase: 'backend',
+        title: 'Stage 1：加入套件、建立 User Entity',
+        intro: '這關要先幫專案加兩組新工具：Spring Security（身分驗證框架）與 JJWT（產生/解析 JWT 的套件），再建立存使用者的資料表。',
+        steps: [
+          {
+            id: 'auth-pom',
+            title: '在 pom.xml 加入 Security 與 JWT 依賴',
+            instruction: '在 <dependencies> 裡加入 spring-boot-starter-security，以及 io.jsonwebtoken 的 jjwt-api / jjwt-impl / jjwt-jackson 三個套件（版本用 0.12.6；這個版本的 API 跟 0.11.x 不同，後面的 JwtUtil 範例會用 0.12.x 的寫法）。',
+            checkpoint: '你能說出這兩組依賴各自負責什麼（Security 負責「攔截檢查」，JJWT 負責「產生與解析 token 字串」）。',
+            hint: `<!-- pom.xml：加進 <dependencies> 裡 -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+
+<!-- JJWT：純粹負責「做出 token 字串」與「驗證/解析 token」，
+     跟 Spring Security 是兩件事：Security 負責攔截請求，
+     JJWT 負責 token 本身的加密簽章。
+     這裡用 0.12.6（0.12.x 系列），三個 artifact 版本號務必一致，
+     否則執行期會出現 NoSuchMethodError 這種相容性錯誤。
+     0.12.x 跟舊版 0.11.x 的 API 寫法不同，務必跟你 pom.xml 裡實際的版本一致，
+     不然編譯會報找不到方法（下面 JwtUtil 範例會示範兩版差異）。 -->
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-api</artifactId>
+    <version>0.12.6</version>
+</dependency>
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-impl</artifactId>
+    <version>0.12.6</version>
+    <scope>runtime</scope>
+</dependency>
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt-jackson</artifactId>
+    <version>0.12.6</version>
+    <scope>runtime</scope>
+</dependency>`,
+          },
+          {
+            id: 'auth-entity',
+            title: '建立 UserEntity + UserRepository',
+            instruction: '新增 package auth。UserEntity：id、username（@Column(unique = true)）、password（存雜湊後的字串，欄位名建議 passwordHash）。Repository 加衍生查詢 Optional<UserEntity> findByUsername(String username)。',
+            checkpoint: '你能解釋為什麼欄位要叫 passwordHash 而不是 password（提醒自己「這裡存的不是明文」）。',
+            hint: `package com.example.react_learning.auth;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "app_users")
+public class UserEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true, length = 50)
+    private String username;
+
+    // 存的是 BCrypt 雜湊後的結果（一長串亂碼），不是使用者輸入的原始密碼。
+    @Column(nullable = false)
+    private String passwordHash;
+
+    protected UserEntity() {
+    }
+
+    public UserEntity(String username, String passwordHash) {
+        this.username = username;
+        this.passwordHash = passwordHash;
+    }
+
+    public Long getId() { return id; }
+    public String getUsername() { return username; }
+    public String getPasswordHash() { return passwordHash; }
+}
+
+// UserRepository.java
+package com.example.react_learning.auth;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.Optional;
+
+public interface UserRepository extends JpaRepository<UserEntity, Long> {
+    Optional<UserEntity> findByUsername(String username);
+}`,
+          },
+        ],
+      },
+      {
+        id: 'auth-stage-service',
+        phase: 'backend',
+        title: 'Stage 2：註冊 / 登入邏輯與 JWT 產生',
+        intro: '這關是這個專案的核心：密碼怎麼加密存、登入成功怎麼發一張「通行證」（JWT token）。',
+        steps: [
+          {
+            id: 'auth-dto',
+            title: '建立 AuthRequest / AuthResponse DTO',
+            instruction: 'AuthRequest(username, password) 用 @NotBlank 驗證兩個欄位。AuthResponse(token) 是登入成功要回傳的格式。',
+            checkpoint: '你能說出為什麼不能直接把 UserEntity 當回傳格式（會把 passwordHash 洩漏給前端）。',
+            hint: `public record AuthRequest(
+        @NotBlank(message = "帳號不可為空") String username,
+        @NotBlank(message = "密碼不可為空") String password
+) {}
+
+public record AuthResponse(String token) {}`,
+          },
+          {
+            id: 'auth-jwt-util',
+            title: '建立 JwtUtil：產生與解析 token',
+            instruction: '寫一個 JwtUtil 類別：generateToken(username) 用 JJWT 簽出一張帶 username 與過期時間的 token；extractUsername(token) 反過來解析 token 拿回 username（token 壞掉或過期就丟例外）。⚠️ 這裡用的是 jjwt 0.12.6（0.12.x 系列）的 API，寫法是 subject/issuedAt/expiration 與 parser().verifyWith(...).build().parseSignedClaims(...)；這跟 0.11.x 的 setSubject()/setIssuedAt()/setSigningKey()/parseClaimsJws() 不一樣，如果你的 pom.xml 版本是 0.12.x，一定要照下面這個寫法，不然會編譯不過。',
+            checkpoint: '你能解釋 JWT 為什麼是「無狀態」的（伺服器不用存 session，靠簽章驗證 token 沒被竄改）。',
+            hint: `package com.example.react_learning.auth;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.SecretKey;
+import java.util.Date;
+
+@Component
+public class JwtUtil {
+    // 正式環境要把這組金鑰放到環境變數，不能寫死在程式碼裡。
+    private final SecretKey key = Keys.hmacShaKeyFor(
+            "this-is-a-32-byte-long-secret-key-for-demo".getBytes());
+    private final long expirationMillis = 1000 * 60 * 60; // 1 小時
+
+    // 0.12.x 的 builder API：方法名不再有 set 前綴（subject 取代 setSubject）。
+    public String generateToken(String username) {
+        return Jwts.builder()
+                .subject(username)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + expirationMillis))
+                .signWith(key) // 0.12.x 一樣可以只丟 key，會依 key 型別自動挑演算法
+                .compact();
+    }
+
+    // 解析成功代表：簽章正確（沒被竄改）且沒過期，回傳裡面存的 username。
+    // 只要有一項不對，這裡就會直接丟例外，由 Filter 接住轉成 401。
+    // 0.12.x 的解析 API：parser().verifyWith(key).build().parseSignedClaims(token)，
+    // 拿到的是 Jws<Claims>，要透過 getPayload() 取出 Claims 再讀 getSubject()。
+    public String extractUsername(String token) {
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getSubject();
+    }
+}
+
+// 小提醒：如果你的 pom.xml 實際版本是舊的 0.11.x（例如 0.11.5），
+// 上面兩個方法要改成 0.11.x 的寫法：
+// generateToken： Jwts.builder().setSubject(username).setIssuedAt(new Date())
+//                 .setExpiration(expiry).signWith(key).compact();
+// extractUsername：Jwts.parser().setSigningKey(key).parseClaimsJws(token)
+//                 .getBody().getSubject();
+// 兩套 API 混用會編譯失敗，務必跟 pom.xml 的版本對齊
+// （最簡單的判斷方式：0.12.x 方法名沒有 set 前綴，0.11.x 都有）。`,
+          },
+          {
+            id: 'auth-service-controller',
+            title: 'AuthService + AuthController（register / login）',
+            instruction: 'register：檢查 username 是否已存在（存在就丟 400），用 BCryptPasswordEncoder 把密碼加密後存進去。login：找到使用者、用 encoder.matches 比對密碼，正確就用 JwtUtil 發一張 token。',
+            checkpoint: '你能說出 BCryptPasswordEncoder.matches(rawPassword, hash) 內部在做什麼（把 rawPassword 用同樣演算法雜湊，再跟資料庫的 hash 比對，而不是反解密）。',
+            hint: `@Service
+public class AuthService {
+    private final UserRepository userRepository;
+    private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    public AuthService(UserRepository userRepository, JwtUtil jwtUtil) {
+        this.userRepository = userRepository;
+        this.jwtUtil = jwtUtil;
+    }
+
+    public void register(AuthRequest request) {
+        if (userRepository.findByUsername(request.username()).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "帳號已被使用");
+        }
+        String hash = passwordEncoder.encode(request.password());
+        userRepository.save(new UserEntity(request.username(), hash));
+    }
+
+    public AuthResponse login(AuthRequest request) {
+        UserEntity user = userRepository.findByUsername(request.username())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "帳號或密碼錯誤"));
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "帳號或密碼錯誤");
+        }
+        return new AuthResponse(jwtUtil.generateToken(user.getUsername()));
+    }
+}
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+    private final AuthService authService;
+
+    public AuthController(AuthService authService) { this.authService = authService; }
+
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void register(@Valid @RequestBody AuthRequest request) {
+        authService.register(request);
+    }
+
+    @PostMapping("/login")
+    public AuthResponse login(@Valid @RequestBody AuthRequest request) {
+        return authService.login(request);
+    }
+
+    // 這個端點必須通過 JwtAuthFilter 檢查才能進來，
+    // 所以能執行到這裡，代表 SecurityContext 裡一定有已驗證的使用者。
+    @GetMapping("/me")
+    public Map<String, String> me(Authentication authentication) {
+        return Map.of("username", authentication.getName());
+    }
+}`,
+          },
+        ],
+      },
+      {
+        id: 'auth-stage-security',
+        phase: 'backend',
+        title: 'Stage 3：JwtAuthFilter + SecurityConfig（保護 API）',
+        intro: '這關要接上 Spring Security：寫一個 Filter，每個請求進來時先檢查有沒有帶合法 token，再決定放不放行。',
+        verify: {
+          id: 'verify-auth-flow',
+          label: '自動驗收：註冊 / 登入 / 保護 API',
+          description: '平台會註冊一個新帳號 → 登入拿 token → 帶 token 打 /me → 不帶 token 打 /me 確認 401 → 重複註冊確認 400。',
+        },
+        steps: [
+          {
+            id: 'auth-filter',
+            title: '建立 JwtAuthFilter',
+            instruction: '繼承 OncePerRequestFilter：從 Authorization header 取出 Bearer token，用 JwtUtil 解析出 username，成功就把使用者塞進 SecurityContext；解析失敗就直接放行讓後面的規則擋下來（不要在這裡直接丟 401，交給 SecurityConfig 統一處理）。⚠️ 記得加 @Component，否則 Spring 不會把它註冊成 Bean，SecurityConfig 會啟動失敗。',
+            checkpoint: '你能解釋為什麼 header 格式要求是 "Bearer xxx" 而不是直接放 token 字串（這是 HTTP 標準的授權格式，一看就知道用的是哪種驗證方案）。',
+            hint: `// @Component 是這個 class 能被 SecurityConfig 注入的關鍵，漏掉會報錯：
+// "required a bean of type 'JwtAuthFilter' that could not be found"
+@Component
+public class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtUtil jwtUtil;
+
+    public JwtAuthFilter(JwtUtil jwtUtil) { this.jwtUtil = jwtUtil; }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                     FilterChain filterChain) throws ServletException, IOException {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            String token = header.substring(7);
+            try {
+                String username = jwtUtil.extractUsername(token);
+                var auth = new UsernamePasswordAuthenticationToken(username, null, List.of());
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            } catch (Exception ignored) {
+                // token 壞掉或過期：不設定 authentication，讓後面規則判斷這個請求「未登入」。
+            }
+        }
+        filterChain.doFilter(request, response);
+    }
+}`,
+          },
+          {
+            id: 'auth-security-config',
+            title: '建立 SecurityConfig',
+            instruction: '設定：/api/auth/register 與 /api/auth/login 允許任何人（permitAll），其餘 /api/auth/** 一定要驗證身分（authenticated）。停用 CSRF（因為是無狀態 API，不用瀏覽器 cookie 機制）。把 JwtAuthFilter 加在 UsernamePasswordAuthenticationFilter 之前。⚠️ 別忘了自訂 AuthenticationEntryPoint：Spring Security 預設在沒有 httpBasic()/formLogin() 時，未認證請求會回 403，但我們要的是 401，一定要自己指定。',
+            checkpoint: '沒帶 token 打 /api/auth/me 會收到 401（不是 403！）；帶對的 token 會收到 200。',
+            hint: `@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable()) // 無狀態 API 不靠 cookie，不需要 CSRF 保護
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // 不建立 HttpSession
+            // 關鍵：沒有這段，未認證請求預設回 403（Http403ForbiddenEntryPoint），
+            // 因為 Spring 找不到「該怎麼引導使用者登入」的機制（沒設 httpBasic/formLogin），
+            // 但我們的 API 規格是「沒帶 token / token 無效 -> 401」，所以要自訂 entry point。
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(
+                (request, response, authException) ->
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
+                .requestMatchers("/api/auth/**").authenticated()
+                .anyRequest().permitAll() // 其他既有的 /api/** 維持不受影響
+            )
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+}
+
+// 401 (Unauthorized) = 「你根本沒登入 / token 無效」
+// 403 (Forbidden)    = 「你登入了，但沒有權限」
+// 這裡的情境屬於前者，千萬別讓它預設變成 403。`,
+          },
+        ],
+      },
+      {
+        id: 'auth-stage-frontend',
+        phase: 'frontend',
+        title: 'Stage 4：React 前端（註冊 / 登入 / 顯示登入者）',
+        intro: `做一個 MyAuthPanel 元件。畫面其實只有「兩種狀態」互相切換，不是三個表單同時出現：
+
+【狀態 A：還沒登入（me 是 null）】
+┌─────────────────────────────┐
+│ 我的會員系統                  │
+│ （如果剛登出/登入失敗會有一行紅字提示）│
+│                               │
+│ 註冊                          │
+│ [帳號____] [密碼____] [註冊]   │
+│                               │
+│ 登入                          │
+│ [帳號____] [密碼____] [登入]   │
+└─────────────────────────────┘
+
+【狀態 B：已登入（me 有值，例如 {username:"alice"}）】
+┌─────────────────────────────┐
+│ 我的會員系統                  │
+│ 👋 歡迎，alice！（token 驗證成功） │
+│ [登出]                        │
+└─────────────────────────────┘
+
+切換的關鍵只有一個：token 這個 state 有沒有值、以及它是否能成功打 /api/auth/me。
+不用使用者自己按「查詢我是誰」的按鈕——元件一偵測到 token 改變（剛登入成功，或是重新整理頁面時從 localStorage 讀到舊 token），
+就自動用 useEffect 打一次 /me：成功就把 me 設好、畫面切到狀態 B；失敗（token 過期/被竄改）就把 token 清掉、退回狀態 A 並顯示提示。`,
+        steps: [
+          {
+            id: 'auth-fe-forms',
+            title: '建立 MyAuthPanel.jsx（註冊 + 登入 + 自動驗證 + 登出）',
+            instruction: '兩組 state 分別給註冊表單與登入表單；token 存進 state 同時寫進 localStorage（重新整理頁面不會登出）。重點是用一個 useEffect 監聽 token 變化，自動打 /api/auth/me 換回 me（登入者資訊），用 me 是否有值來決定畫面要顯示「表單」還是「歡迎詞 + 登出」，不要只顯示 token 字串給人看。',
+            checkpoint: '① 登入成功後畫面自動切成「歡迎，{username}」而不是顯示一串 token。② 重新整理頁面，只要 token 還沒過期，會自動維持登入狀態。③ 按登出後，畫面立刻退回註冊/登入表單，localStorage 的 token 也被清掉。',
+            hint: `import { useEffect, useState } from 'react'
+
+export default function MyAuthPanel() {
+  const [registerForm, setRegisterForm] = useState({ username: '', password: '' })
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  // 初始值直接從 localStorage 讀：重新整理頁面不會瞬間跳回「未登入」畫面。
+  const [token, setToken] = useState(() => localStorage.getItem('demo-jwt-token') ?? '')
+  // me 是「後端驗證過 token 之後回傳的登入者資訊」，不是前端自己猜的。
+  // me 有值 = 真的登入成功；me 是 null = 未登入（不管 token 欄位有沒有值）。
+  const [me, setMe] = useState(null)
+  const [message, setMessage] = useState('')
+
+  // 核心流程：只要 token 變了（剛登入成功 / 頁面剛載入時從 localStorage 讀到舊 token），
+  // 就自動打一次 /api/auth/me 去跟後端確認「這張 token 到底還有沒有效、是誰的」。
+  // 這一步做完，畫面才會真的切換成「歡迎，xxx」，不是前端自己假裝登入成功。
+  useEffect(() => {
+    let cancelled = false
+    async function verifyToken() {
+      if (!token) {
+        setMe(null)
+        return
+      }
+      const response = await fetch('/api/auth/me', {
+        headers: { Authorization: \`Bearer \${token}\` },
+      })
+      if (cancelled) return
+      if (response.ok) {
+        setMe(await response.json())
+      } else {
+        // token 失效（過期、格式被改過）：清掉 token，退回登入畫面並提示使用者。
+        setMe(null)
+        setToken('')
+        localStorage.removeItem('demo-jwt-token')
+        setMessage('登入已過期，請重新登入')
+      }
+    }
+    verifyToken()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  async function handleRegister(event) {
+    event.preventDefault()
+    setMessage('')
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(registerForm),
+    })
+    if (response.ok) {
+      setMessage('註冊成功，可以登入了！')
+      setRegisterForm({ username: '', password: '' })
+    } else {
+      setMessage('註冊失敗：帳號可能已被使用')
+    }
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault()
+    setMessage('')
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(loginForm),
+    })
+    if (!response.ok) {
+      setMessage('登入失敗：帳號或密碼錯誤')
+      return
+    }
+    const body = await response.json()
+    // 這裡只負責存 token；真正「確認有效、拿到 username」交給上面的 useEffect
+    // （它監聽 token 變化，token 一改變就自動驗證一次）。
+    setToken(body.token)
+    localStorage.setItem('demo-jwt-token', body.token)
+    setLoginForm({ username: '', password: '' })
+  }
+
+  function handleLogout() {
+    setToken('')
+    setMe(null)
+    localStorage.removeItem('demo-jwt-token')
+    setMessage('已登出')
+  }
+
+  // 畫面只有兩種狀態：me 有值 = 已登入 → 顯示歡迎詞 + 登出；
+  // me 是 null = 未登入 → 顯示註冊表單 + 登入表單。
+  if (me) {
+    return (
+      <div className="info-card">
+        <h3>我的會員系統</h3>
+        <p>
+          👋 歡迎，<strong>{me.username}</strong>！（token 驗證成功）
+        </p>
+        <button type="button" onClick={handleLogout}>
+          登出
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="info-card">
+      <h3>我的會員系統</h3>
+      {message ? <p style={{ color: '#b00020' }}>{message}</p> : null}
+
+      <h4>註冊</h4>
+      <form onSubmit={handleRegister}>
+        <input
+          placeholder="帳號"
+          value={registerForm.username}
+          onChange={(event) => setRegisterForm({ ...registerForm, username: event.target.value })}
+        />
+        <input
+          type="password"
+          placeholder="密碼"
+          value={registerForm.password}
+          onChange={(event) => setRegisterForm({ ...registerForm, password: event.target.value })}
+        />
+        <button type="submit">註冊</button>
+      </form>
+
+      <h4>登入</h4>
+      <form onSubmit={handleLogin}>
+        <input
+          placeholder="帳號"
+          value={loginForm.username}
+          onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })}
+        />
+        <input
+          type="password"
+          placeholder="密碼"
+          value={loginForm.password}
+          onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
+        />
+        <button type="submit">登入</button>
+      </form>
+    </div>
+  )
+}
+
+// 常見地雷提醒：
+// 1. body: JSON.stringify(...)——注意是 stringify 不是 stringfy，打錯字編譯不會錯，
+//    但 fetch 會把整個物件轉成 "[object Object]" 送出去，後端收到的 username/password 會是 undefined。
+// 2. 不要只靠「存了 token」就當作登入成功——一定要實際打一次 /me 驗證過，
+//    不然 token 被竄改或過期時，畫面還是會錯誤地顯示登入成功。`,
+          },
+          {
+            id: 'auth-fe-mount',
+            title: '掛上頁面展示',
+            instruction: '在 App.jsx 最上面 import MyAuthPanel，並在 InterviewProjectsSection 的 showcases 陣列裡，新增一筆 { id: \'project-auth\', component: <MyAuthPanel /> }（跟 project-shortlink / project-expense 那兩筆並排即可）。',
+            checkpoint: '切換到「會員登入系統」這個面試專案分頁時，成果展示區能看到你的登入系統，註冊、登入、讀取 /me 都正常運作。',
+            hint: `// App.jsx 最上面加：
+import MyAuthPanel from './components/MyAuthPanel'
+
+// 找到 <InterviewProjectsSection ... showcases={[ ... ]} />，
+// 在陣列裡多加一筆（元件本身放在 component 欄位，id 要對上 learningContent.js 的 project id）：
+showcases={[
+  { id: 'project-shortlink', component: <MyShortLinks /> },
+  { id: 'project-expense', component: <MyExpenseTracker /> },
+  { id: 'project-auth', component: <MyAuthPanel /> },
+]}`,
+          },
+        ],
+      },
+    ],
+    interviewQuestions: [
+      {
+        question: 'Session 與 JWT（token-based）驗證的差異是什麼？',
+        answerHint: 'Session 是「伺服器記住你」，資料存在伺服器（要跨機器就得共享 session）。JWT 是「伺服器什麼都不記，token 自己帶著身分資訊 + 簽章」，適合分散式/多台伺服器，缺點是 token 發出去前很難提前撤銷。',
+      },
+      {
+        question: '密碼為什麼要用 BCrypt，不能直接用 MD5 或 SHA-256？',
+        answerHint: 'MD5/SHA-256 是「快速雜湊」，設計目的是驗證資料完整性，容易被暴力破解或查表（rainbow table）反推。BCrypt 刻意設計得「很慢」且自動加鹽（salt），大幅提高破解成本，是密碼儲存的業界標準。',
+      },
+      {
+        question: 'JWT token 該存在 localStorage 還是 httpOnly cookie？',
+        answerHint: 'localStorage 簡單但怕 XSS（惡意 script 可以直接讀走）；httpOnly cookie 讓 JS 讀不到 token，更安全，但要多處理 CSRF 防護。教學版用 localStorage 圖方便，正式產品建議 httpOnly cookie。',
+      },
+      {
+        question: 'JWT 是無狀態的，那要怎麼讓使用者「登出」或讓 token 提前失效？',
+        answerHint: '純 JWT 沒有內建撤銷機制，常見做法：(1) 縮短過期時間 + refresh token 換新，(2) 維護一個「已撤銷 token 黑名單」（要額外存狀態，等於部分犧牲無狀態特性）。這題答出取捨就是加分。',
+      },
+      {
+        question: '為什麼 AuthResponse 只回傳 token，不直接把 UserEntity 回傳給前端？',
+        answerHint: 'UserEntity 裡有 passwordHash，就算是雜湊後的值也不該離開後端——這是資安基本原則「最小揭露」。DTO 的存在就是為了控制「這個 API 到底要曝光哪些欄位」。',
+      },
+    ],
+  },
+  {
+    id: 'project-inventory',
+    title: '商品庫存管理（分頁 + 排序 + 併發扣庫存）',
+    subtitle: '電商後台最常見的功能組合：清單分頁排序，以及「搶購」時的併發扣庫存問題',
+    goal: '做出商品清單（可分頁、可依價格排序）與購買扣庫存 API，並體會兩人同時搶最後一件商品時，資料庫怎麼幫你擋下衝突。',
+    interviewValue: [
+      'Pageable + Sort 是 Spring Data JPA「怎麼做分頁排序」的標準答案，後台系統幾乎都要用到。',
+      '樂觀鎖（@Version）是面試「兩人同時搶最後一件商品，庫存會不會被多扣」的經典追問題。',
+      '409 Conflict 狀態碼 + 重試策略，展示你懂併發控制不是只會背名詞。',
+    ],
+    apiContract: [
+      'POST /api/products                          -> 201，建立商品（price >= 1、stock >= 0）',
+      'GET  /api/products?page=0&size=5&sort=price,asc -> 200，分頁 + 排序結果（{ content, totalElements, ... }）',
+      'POST /api/products/{id}/purchase             -> 200，扣 1 件庫存並回傳最新商品；庫存不足回 409；商品不存在回 404',
+    ],
+    stages: [
+      {
+        id: 'inv-stage-entity',
+        phase: 'backend',
+        title: 'Stage 1：ProductEntity（含 @Version 樂觀鎖欄位）',
+        intro: '這次 Entity 多一個新角色：@Version。它是 Hibernate 用來偵測「這筆資料在我讀它之後，有沒有被別人改過」的機關。',
+        steps: [
+          {
+            id: 'inv-entity',
+            title: '建立 ProductEntity + ProductRepository',
+            instruction: '新增 package inventory。欄位：id、name、price（int）、stock（int）、version（@Version，Long）。Repository 直接 extends JpaRepository（分頁排序功能它已經內建，不用自己寫）。',
+            checkpoint: '你能解釋 @Version 欄位平常長什麼樣（每次 UPDATE 成功就自動 +1，你完全不用手動維護它）。',
+            hint: `package com.example.react_learning.inventory;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "products")
+public class ProductEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, length = 50)
+    private String name;
+
+    @Column(nullable = false)
+    private int price;
+
+    @Column(nullable = false)
+    private int stock;
+
+    // 樂觀鎖版本號：Hibernate 自動管理，UPDATE 時會下
+    // "UPDATE products SET ..., version = version + 1 WHERE id = ? AND version = ?"
+    // 如果 WHERE 條件對不上（代表資料被別人先改走了），
+    // 這次 UPDATE 影響 0 筆，Hibernate 就會丟出 OptimisticLockingFailureException。
+    @Version
+    private Long version;
+
+    protected ProductEntity() {
+    }
+
+    public ProductEntity(String name, int price, int stock) {
+        this.name = name;
+        this.price = price;
+        this.stock = stock;
+    }
+
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public int getPrice() { return price; }
+    public int getStock() { return stock; }
+    public void decreaseStock() { this.stock -= 1; }
+}
+
+// ProductRepository.java
+package com.example.react_learning.inventory;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+// JpaRepository 已經內建分頁/排序能力（findAll(Pageable pageable)），
+// 這次不用額外宣告衍生查詢就能做出分頁排序 API。
+public interface ProductRepository extends JpaRepository<ProductEntity, Long> {
+}`,
+          },
+        ],
+      },
+      {
+        id: 'inv-stage-listing',
+        phase: 'backend',
+        title: 'Stage 2：分頁排序 API',
+        intro: '學會怎麼讓前端用 ?page=&size=&sort= 控制列表，而不用自己手刻 LIMIT/OFFSET 邏輯。',
+        steps: [
+          {
+            id: 'inv-controller-list',
+            title: 'Controller：GET /api/products 支援 Pageable',
+            instruction: '方法參數直接寫 Pageable pageable，Spring 會自動從 query string（page、size、sort）組成分頁物件。回傳型別用 Page<ProductEntity>（或轉成你自己的 DTO）。',
+            checkpoint: '打 /api/products?page=0&size=2&sort=price,desc 會看到價格由高到低、每頁 2 筆的結果。',
+            hint: `@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+    private final ProductRepository productRepository;
+
+    public ProductController(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    // Pageable 是 Spring 幫你組好的物件：page（第幾頁，從 0 開始）、
+    // size（每頁幾筆）、sort（依哪個欄位排序）都會自動從 query string 解析進來。
+    @GetMapping
+    public Page<ProductEntity> getProducts(Pageable pageable) {
+        return productRepository.findAll(pageable);
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProductEntity createProduct(@Valid @RequestBody ProductRequest request) {
+        return productRepository.save(
+                new ProductEntity(request.name(), request.price(), request.stock()));
+    }
+}
+
+// ProductRequest.java
+public record ProductRequest(
+        @NotBlank String name,
+        @Min(value = 1, message = "price 至少要 1") int price,
+        @Min(value = 0, message = "stock 不能是負數") int stock
+) {}`,
+          },
+        ],
+      },
+      {
+        id: 'inv-stage-purchase',
+        phase: 'backend',
+        title: 'Stage 3：購買扣庫存 + 處理併發衝突',
+        intro: '這關是整個專案的靈魂：庫存不足要擋下來，兩人同時搶最後一件也要正確處理，不能讓庫存變成負數。',
+        verify: {
+          id: 'verify-inventory-purchase',
+          label: '自動驗收：分頁排序與扣庫存',
+          description: '平台會建立一件庫存 1 的商品 → 購買一次確認扣成 0 → 再買一次確認 409 → 檢查分頁排序 → 檢查 price 驗證。',
+        },
+        steps: [
+          {
+            id: 'inv-service-purchase',
+            title: 'Service：purchase(id) 扣庫存邏輯',
+            instruction: '找到商品，庫存 <= 0 就丟 409（用 ResponseStatusException(HttpStatus.CONFLICT, ...)）；否則呼叫 entity.decreaseStock() 並 save。找不到商品丟 404。',
+            checkpoint: '你能解釋「庫存不足」跟「版本衝突」雖然都回 409，但代表完全不同的原因（一個是業務規則，一個是併發競爭）。',
+            hint: `@Service
+public class ProductService {
+    private final ProductRepository productRepository;
+
+    public ProductService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    public ProductEntity purchase(Long id) {
+        ProductEntity product = productRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到商品"));
+
+        if (product.getStock() <= 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "庫存不足，手慢了");
+        }
+
+        product.decreaseStock();
+        // save 的當下，Hibernate 會用 @Version 檢查：
+        // 如果別人在我讀取之後、我 save 之前，已經搶先改過這筆資料，
+        // 這裡就會丟 ObjectOptimisticLockingFailureException，被下面的 Controller 接住轉成 409。
+        return productRepository.save(product);
+    }
+}`,
+          },
+          {
+            id: 'inv-controller-purchase',
+            title: 'Controller：接住樂觀鎖例外，轉成 409',
+            instruction: '在 Controller（或 GlobalExceptionHandler）加一個 @ExceptionHandler(ObjectOptimisticLockingFailureException.class)，回 409 並附上「請重新整理再試一次」的訊息。',
+            checkpoint: '兩個瀏覽器分頁同時對「庫存只剩 1」的商品按購買，其中一個會成功、另一個會收到 409，庫存不會變成 -1。',
+            hint: `@PostMapping("/{id}/purchase")
+public ProductEntity purchase(@PathVariable Long id) {
+    return productService.purchase(id);
+}
+
+// 建議加在 GlobalExceptionHandler 裡，跟其他例外處理放在一起：
+@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+public ResponseEntity<ApiErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+    ApiErrorResponse body = new ApiErrorResponse(
+            409, "STOCK_CONFLICT", "商品剛被搶購，請重新整理再試一次。", null, Instant.now(), List.of());
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+}`,
+          },
+        ],
+      },
+      {
+        id: 'inv-stage-frontend',
+        phase: 'frontend',
+        title: 'Stage 4：React 前端（分頁列表 + 排序 + 購買按鈕）',
+        intro: '做一個 MyInventory 元件：列表可以換頁、換排序方式，購買按鈕要能處理 409（庫存不足/版本衝突）並提示使用者重新整理。',
+        steps: [
+          {
+            id: 'inv-fe-list',
+            title: '建立 MyInventory.jsx（分頁 + 排序 + 購買）',
+            instruction: 'state：page、sort、products。useEffect 依 page/sort 變化重新 fetch。購買按鈕呼叫 POST /purchase，若回 409 就跳出提示文字，並重新整理列表確認最新庫存。',
+            checkpoint: '切換排序方式或換頁時，畫面會重新抓對應的資料；庫存為 0 時按購買會看到清楚的錯誤提示，而不是沒反應。',
+            hint: `import { useEffect, useState } from 'react'
+
+export default function MyInventory() {
+  const [products, setProducts] = useState([])
+  const [page, setPage] = useState(0)
+  const [sort, setSort] = useState('price,asc')
+  const [message, setMessage] = useState('')
+
+  async function loadProducts() {
+    const response = await fetch(\`/api/products?page=\${page}&size=5&sort=\${sort}\`)
+    const body = await response.json()
+    setProducts(body.content)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const response = await fetch(\`/api/products?page=\${page}&size=5&sort=\${sort}\`)
+      const body = await response.json()
+      if (!cancelled) setProducts(body.content)
+    }
+    run()
+    return () => { cancelled = true }
+  }, [page, sort])
+
+  async function handlePurchase(id) {
+    const response = await fetch(\`/api/products/\${id}/purchase\`, { method: 'POST' })
+    if (response.status === 409) {
+      setMessage('手慢了，庫存被搶光了或剛被其他人買走，畫面已重新整理。')
+      await loadProducts()
+      return
+    }
+    setMessage('購買成功！')
+    await loadProducts()
+  }
+
+  // ...JSX：排序下拉、分頁按鈕、商品列表 + 購買按鈕、message 提示
+}`,
+          },
+          {
+            id: 'inv-fe-mount',
+            title: '掛上頁面展示',
+            instruction: '在 App.jsx 最上面 import MyInventory，並在 InterviewProjectsSection 的 showcases 陣列裡，新增一筆 { id: \'project-inventory\', component: <MyInventory /> }。',
+            checkpoint: '切換到「商品庫存管理」這個面試專案分頁時，成果展示區能看到你的庫存系統，分頁、排序、購買都正常運作，庫存歸零後會看到清楚的錯誤提示。',
+            hint: `// App.jsx 最上面加：
+import MyInventory from './components/MyInventory'
+
+// 找到 <InterviewProjectsSection ... showcases={[ ... ]} />，
+// 在陣列裡多加一筆：
+showcases={[
+  { id: 'project-shortlink', component: <MyShortLinks /> },
+  { id: 'project-expense', component: <MyExpenseTracker /> },
+  { id: 'project-auth', component: <MyAuthPanel /> },
+  { id: 'project-inventory', component: <MyInventory /> },
+]}`,
+          },
+        ],
+      },
+    ],
+    interviewQuestions: [
+      {
+        question: 'Pageable 的 page/size/sort 參數，Spring 底層怎麼變成 SQL？',
+        answerHint: 'Spring Data JPA 會組出帶 LIMIT/OFFSET（或資料庫對應語法）與 ORDER BY 的查詢，page*size 算出 OFFSET，size 是 LIMIT，sort 直接接到 ORDER BY 後面。這些你完全不用手寫。',
+      },
+      {
+        question: '@Version 樂觀鎖的原理是什麼？',
+        answerHint: '每次 UPDATE 時，SQL 會多加 "AND version = ?" 這個條件；如果沒人搶先改過，條件成立、version +1；如果被搶先改過，WHERE 條件對不上，影響 0 筆，Hibernate 判斷這是衝突，丟出例外。',
+      },
+      {
+        question: '樂觀鎖跟悲觀鎖怎麼選？',
+        answerHint: '樂觀鎖假設「衝突機率低」，先做完再檢查，衝突時重試成本低（適合這種秒殺場景）。悲觀鎖是「先鎖住再做」（SELECT ... FOR UPDATE），適合衝突機率高、或衝突後代價很高的場景，但會犧牲併發效能。',
+      },
+      {
+        question: '為什麼不能寫成「前端先 GET 拿庫存，判斷夠不夠，再 POST 扣庫存」？',
+        answerHint: '這是經典的 TOCTOU（Time-Of-Check to Time-Of-Use）問題：兩個請求都在「檢查」的當下看到庫存還有 1，都判斷可以買，結果都送出扣庫存，庫存變成 -1。扣庫存的檢查與動作必須在同一次資料庫操作裡原子化完成。',
+      },
+      {
+        question: '這種 OFFSET 分頁在資料量很大時會有什麼效能問題？',
+        answerHint: 'OFFSET 越大，資料庫要先掃過並丟棄前面所有列才能拿到目標頁，越後面的頁越慢。解法是「keyset / cursor 分頁」：用上一頁最後一筆的 id 或排序欄位當作查詢條件（WHERE id > ?），不管翻到第幾頁效能都一樣。',
+      },
+    ],
+  },
+  {
+    id: 'project-comments',
+    title: '留言板 / 評論系統（接 MySQL）',
+    subtitle: '最常見的「一對多內容」系統雛形，練習排序查詢與驗證，並示範接上真正的外部 MySQL',
+    goal: '做出一個可以張貼留言、依時間新到舊排序、刪除留言的 API。預設用 H2 就能完整開發與驗收；接著照著 16. 串接外部資料庫 的步驟，改用 --spring.profiles.active=mysql 接到 Docker 裡的 MySQL，體會同一支程式換資料庫的過程。',
+    interviewValue: [
+      '留言板/評論系統幾乎是所有內容型產品（部落格、電商評價、社群）的共同基礎元件，面試常被當作「簡化版」考題。',
+      '核心練習是「依建立時間排序」這個最常見的查詢需求——用 JPA 衍生查詢 findAllByOrderByCreatedAtDesc 不用寫任何 SQL 就能做到。',
+      '刻意串接外部 MySQL：能具體聊「開發機用 H2、正式環境接 MySQL」這種分層架構的實務經驗，而不是紙上談兵。',
+    ],
+    apiContract: [
+      'POST   /api/comments       -> 201，建立留言（author、content 都不能空白，content 長度上限 500）',
+      'GET    /api/comments       -> 200，回傳所有留言，依建立時間「新到舊」排序',
+      'DELETE /api/comments/{id}  -> 204，刪除留言；不存在回 404',
+    ],
+    stages: [
+      {
+        id: 'cm-stage-entity',
+        phase: 'backend',
+        title: 'Stage 1：Entity + 依時間排序的衍生查詢',
+        intro: '這次 Entity 新增一個 @PrePersist：讓 createdAt 在「第一次真正存進資料庫前」自動補上目前時間，不用每次手動設定。',
+        steps: [
+          {
+            id: 'cm-entity',
+            title: '建立 CommentEntity + CommentRepository',
+            instruction: '新增 package comment。欄位：id、author（String）、content（String）、createdAt（Instant）。用 @PrePersist 方法在 createdAt 還是 null 時自動補上 Instant.now()。Repository 加一個衍生查詢 findAllByOrderByCreatedAtDesc()。',
+            checkpoint: '你能解釋為什麼排序要交給 findAllByOrderByCreatedAtDesc() 讓資料庫做，而不是查出全部留言後，在 Java 用 List.sort() 自己排。',
+            hint: `package com.example.react_learning.comment;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+
+@Entity
+@Table(name = "comments")
+public class CommentEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, length = 50)
+    private String author;
+
+    @Column(nullable = false, length = 500)
+    private String content;
+
+    @Column(nullable = false)
+    private Instant createdAt;
+
+    protected CommentEntity() {
+    }
+
+    public CommentEntity(String author, String content) {
+        this.author = author;
+        this.content = content;
+    }
+
+    // JPA 在「真正送進資料庫前」會呼叫這個方法一次，
+    // 讓 createdAt 不用每次 new CommentEntity 時手動塞值，也不會忘記設定。
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+    }
+
+    public Long getId() { return id; }
+    public String getAuthor() { return author; }
+    public String getContent() { return content; }
+    public Instant getCreatedAt() { return createdAt; }
+}
+
+// CommentRepository.java
+package com.example.react_learning.comment;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.List;
+
+public interface CommentRepository extends JpaRepository<CommentEntity, Long> {
+    // 方法名稱本身就是查詢條件：依 createdAt 由新到舊排序。
+    // 排序交給資料庫（通常有索引），比撈全部資料回 Java 端自己排快得多，資料量越大差距越明顯。
+    List<CommentEntity> findAllByOrderByCreatedAtDesc();
+}`,
+          },
+        ],
+      },
+      {
+        id: 'cm-stage-api',
+        phase: 'backend',
+        title: 'Stage 2：DTO 驗證 + CRUD API',
+        intro: '跟 Task/短網址一樣的套路：DTO 負責驗證輸入，Controller 負責對外契約。',
+        verify: {
+          id: 'verify-comments-crud',
+          label: '自動驗收：留言排序 + 驗證 + 刪除',
+          description: '依序建立兩則留言、確認排序正確、確認空白內容被擋下、刪除其中一則後確認真的消失。',
+        },
+        steps: [
+          {
+            id: 'cm-dto-controller',
+            title: '建立 CommentRequest + CommentController',
+            instruction: 'CommentRequest 用 @NotBlank 驗證 author、content，content 另外加 @Size(max = 500)。Controller：POST 建立、GET 回傳 findAllByOrderByCreatedAtDesc() 的結果、DELETE 用 existsById 檢查後再刪，不存在就丟 404。',
+            checkpoint: '完成後按下方「執行自動驗收」，五項全部通過。',
+            hint: `package com.example.react_learning.comment;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record CommentRequest(
+        @NotBlank String author,
+        @NotBlank @Size(max = 500, message = "留言內容最多 500 字") String content
+) {}
+
+// CommentController.java
+package com.example.react_learning.comment;
+
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import java.util.NoSuchElementException;
+
+@RestController
+@RequestMapping("/api/comments")
+public class CommentController {
+    private final CommentRepository commentRepository;
+
+    public CommentController(CommentRepository commentRepository) {
+        this.commentRepository = commentRepository;
+    }
+
+    @GetMapping
+    public List<CommentEntity> getComments() {
+        return commentRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommentEntity createComment(@Valid @RequestBody CommentRequest request) {
+        return commentRepository.save(new CommentEntity(request.author(), request.content()));
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteComment(@PathVariable Long id) {
+        if (!commentRepository.existsById(id)) {
+            throw new NoSuchElementException("留言不存在：" + id);
+        }
+        commentRepository.deleteById(id);
+    }
+}`,
+          },
+        ],
+      },
+      {
+        id: 'cm-stage-mysql',
+        phase: 'backend',
+        title: 'Stage 3：接上真正的外部 MySQL（選用進階挑戰）',
+        intro: '這一步不需要改任何 Java 程式碼，純粹是「換資料庫設定」的練習——這正是前面 16. 串接外部資料庫 教的分層架構價值。如果這台機器不能跑 Docker，可以先跳過，之後在能跑 Docker 的機器上再做這個 Stage。',
+        steps: [
+          {
+            id: 'cm-use-mysql',
+            title: '用 MySQL 設定檔重新啟動後端',
+            instruction: '參考 16. 串接外部資料庫 的 MySQL 練習：docker compose --profile mysql up -d 啟動 MySQL 容器，pom.xml 打開 mysql-connector-j 註解，再用 --spring.profiles.active=mysql 啟動後端。重新打開前端頁面測試留言功能，行為應該跟剛剛用 H2 時一模一樣。',
+            checkpoint: '用 docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM comments;" 能看到透過 API 新增的留言，證明資料真的進了 MySQL，而不是 H2。',
+            hint: `# 1. 啟動 MySQL 容器
+docker compose --profile mysql up -d
+
+# 2. pom.xml 打開 mysql-connector-j 註解（參考 16. 串接外部資料庫）
+
+# 3. 用 mysql profile 啟動後端
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+
+# 4. 驗證資料真的進了 MySQL
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM comments;"`,
+          },
+        ],
+      },
+      {
+        id: 'cm-stage-frontend',
+        phase: 'frontend',
+        title: 'Stage 4：React 前端（張貼 + 列表 + 刪除）',
+        intro: '做一個 MyCommentBoard 元件：上面是張貼表單，下面是留言列表（新到舊），每則留言旁邊有刪除按鈕。',
+        steps: [
+          {
+            id: 'cm-fe',
+            title: '建立 MyCommentBoard.jsx',
+            instruction: '一組 state 存表單（author、content），一組 state 存留言陣列。送出表單後呼叫 POST，成功後重新 GET 一次更新列表；點刪除呼叫 DELETE 後也重新 GET 一次。',
+            checkpoint: '新增留言後，畫面最上面會立刻看到新留言（因為後端已經幫你排序好），刪除後該則留言立刻從畫面消失。',
+            hint: `import { useEffect, useState } from 'react'
+
+export default function MyCommentBoard() {
+  const [comments, setComments] = useState([])
+  const [form, setForm] = useState({ author: '', content: '' })
+  const [error, setError] = useState('')
+
+  async function loadComments() {
+    const response = await fetch('/api/comments')
+    setComments(await response.json())
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    async function initialLoad() {
+      const response = await fetch('/api/comments')
+      const data = await response.json()
+      if (!cancelled) setComments(data)
+    }
+    initialLoad()
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    const response = await fetch('/api/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    })
+    if (!response.ok) {
+      setError('留言失敗：author 和 content 都要填寫')
+      return
+    }
+    setForm({ author: '', content: '' })
+    await loadComments()
+  }
+
+  async function handleDelete(id) {
+    await fetch(\`/api/comments/\${id}\`, { method: 'DELETE' })
+    await loadComments()
+  }
+
+  return (
+    <div className="info-card">
+      <h3>我的留言板</h3>
+      <form onSubmit={handleSubmit}>
+        <input
+          placeholder="你的名字"
+          value={form.author}
+          onChange={(e) => setForm({ ...form, author: e.target.value })}
+        />
+        <input
+          placeholder="留言內容"
+          value={form.content}
+          onChange={(e) => setForm({ ...form, content: e.target.value })}
+        />
+        <button type="submit">送出留言</button>
+      </form>
+      {error ? <p style={{ color: 'red' }}>{error}</p> : null}
+      <ul>
+        {comments.map((comment) => (
+          <li key={comment.id}>
+            <strong>{comment.author}</strong>：{comment.content}
+            <button type="button" onClick={() => handleDelete(comment.id)}>刪除</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}`,
+          },
+          {
+            id: 'cm-fe-mount',
+            title: '掛上頁面展示',
+            instruction: '在 App.jsx 最上面 import MyCommentBoard，並在 InterviewProjectsSection 的 showcases 陣列裡，新增一筆 { id: \'project-comments\', component: <MyCommentBoard /> }。',
+            checkpoint: '切換到「留言板 / 評論系統」這個面試專案分頁時，成果展示區能看到留言板，張貼與刪除都正常運作。',
+            hint: `// App.jsx 最上面加：
+import MyCommentBoard from './components/MyCommentBoard'
+
+// showcases 陣列裡多加一筆：
+showcases={[
+  { id: 'project-shortlink', component: <MyShortLinks /> },
+  { id: 'project-expense', component: <MyExpenseTracker /> },
+  { id: 'project-auth', component: <MyAuthPanel /> },
+  { id: 'project-inventory', component: <MyInventory /> },
+  { id: 'project-comments', component: <MyCommentBoard /> },
+]}`,
+          },
+        ],
+      },
+    ],
+    interviewQuestions: [
+      {
+        question: '為什麼排序要用 findAllByOrderByCreatedAtDesc()，不要查全部資料回 Java 再用 Comparator 排？',
+        answerHint: '資料庫對排序欄位（尤其有索引時）做排序，效率遠高於把所有資料搬到應用程式記憶體裡再排。而且資料庫端排序可以搭配分頁（只搬需要的那幾筆），Java 端排序通常得先撈出全部資料，資料量一大就會變成效能瓶頸與記憶體壓力。',
+      },
+      {
+        question: '@PrePersist 是什麼時機點執行？跟在建構子裡直接塞 Instant.now() 有什麼差別？',
+        answerHint: '@PrePersist 是 JPA 生命週期回呼，在「這個物件第一次真正要被寫進資料庫」前觸發。如果在建構子裡塞時間，那只要 new 出物件但還沒存檔前時間就定住了；@PrePersist 確保記錄的是「真正落地存檔」那一刻的時間，對這個情境差異不大，但對「物件 new 出來後可能隔一段時間才存檔」的情境才是正確時間點。',
+      },
+      {
+        question: '這個練習和 Task 功能都用 H2，為什麼還要特地改接 MySQL？',
+        answerHint: '這就是展示「分層架構」最直接的方式：Controller/Service/Repository 完全不用改一行，只靠換 pom.xml 依賴跟 application-{profile}.properties，就能把同一支程式接到不同資料庫。面試被問「你有沒有接過正式資料庫」時，這個經驗比空口說懂 JPA 更有說服力。',
+      },
+      {
+        question: '留言內容長度限制為什麼要同時在前端和後端都做？',
+        answerHint: '前端限制是為了「使用者體驗」（即時提示，不用等後端回應才知道錯）；後端限制（@Size）才是「真正的防線」，因為前端驗證可以被繞過（直接打 API、改瀏覽器開發者工具），後端驗證才能保證資料庫裡的資料永遠符合規則。',
+      },
+      {
+        question: 'DELETE /api/comments/{id} 為什麼要先 existsById 檢查，不要直接呼叫 deleteById？',
+        answerHint: 'Spring Data JPA 的 deleteById 在 id 不存在時會丟出 EmptyResultDataAccessException，屬於例外狀況不容易精準轉換成你想要的 404 語意。先用 existsById 檢查、不存在就主動丟自訂例外（由 GlobalExceptionHandler 轉成 404），讓 API 的錯誤回應更可控、訊息更清楚。',
+      },
+    ],
+  },
+  {
+    id: 'project-blog',
+    title: '個人部落格文章管理（接 PostgreSQL）',
+    subtitle: '帶草稿/發布狀態的內容管理系統雛形，練習條件查詢，並示範接上真正的外部 PostgreSQL',
+    goal: '做出文章的建立、「只看已發布」查詢、發布切換、刪除 API。預設用 H2 完整開發與驗收；接著照 16. 串接外部資料庫 的步驟，改用 --spring.profiles.active=postgres 接到 Docker 裡的 PostgreSQL。',
+    interviewValue: [
+      '「草稿 / 已發布」狀態機幾乎是所有內容管理系統（CMS、部落格、電商商品上架）的共同需求，練的是條件查詢而不是全撈再用程式篩選。',
+      '衍生查詢 findByPublishedTrue 示範 JPA 怎麼依布林欄位查詢，搭配 @RequestParam 的可選條件查詢是後台系統的標配寫法。',
+      '刻意串接外部 PostgreSQL + pgAdmin：能具體聊「用 GUI 工具檢查資料庫實際狀態」這種除錯實務，而不只是會寫程式。',
+    ],
+    apiContract: [
+      'POST  /api/posts                 -> 201，建立文章（title、body 不能空白），預設 published=false（草稿）',
+      'GET   /api/posts?published=true  -> 200，只回傳已發布文章；不帶這個參數回傳全部文章',
+      'PATCH /api/posts/{id}/publish    -> 200，把文章切換為已發布；不存在回 404',
+      'DELETE /api/posts/{id}           -> 204，刪除文章；不存在回 404',
+    ],
+    stages: [
+      {
+        id: 'blog-stage-entity',
+        phase: 'backend',
+        title: 'Stage 1：Entity + 依發布狀態查詢',
+        intro: 'published 這個布林欄位就是這個練習的核心：它決定一篇文章「外部看不看得到」。',
+        steps: [
+          {
+            id: 'blog-entity',
+            title: '建立 PostEntity + PostRepository',
+            instruction: '新增 package blog。欄位：id、title（String）、body（String）、published（boolean，預設 false）、createdAt（Instant，用 @PrePersist 補值，做法跟留言板那題一樣）。Repository 加衍生查詢 findByPublishedTrueOrderByCreatedAtDesc()。',
+            checkpoint: '你能解釋為什麼新文章預設是草稿（published=false），而不是一建立就直接公開。',
+            hint: `package com.example.react_learning.blog;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+import java.util.List;
+
+@Entity
+@Table(name = "posts")
+public class PostEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, length = 100)
+    private String title;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String body;
+
+    @Column(nullable = false)
+    private boolean published = false;
+
+    @Column(nullable = false)
+    private Instant createdAt;
+
+    protected PostEntity() {
+    }
+
+    public PostEntity(String title, String body) {
+        this.title = title;
+        this.body = body;
+    }
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+    }
+
+    public void publish() {
+        this.published = true;
+    }
+
+    public Long getId() { return id; }
+    public String getTitle() { return title; }
+    public String getBody() { return body; }
+    public boolean isPublished() { return published; }
+    public Instant getCreatedAt() { return createdAt; }
+}
+
+// PostRepository.java
+package com.example.react_learning.blog;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.List;
+
+public interface PostRepository extends JpaRepository<PostEntity, Long> {
+    // 衍生查詢：只找 published = true 的文章，依建立時間新到舊排序。
+    List<PostEntity> findByPublishedTrueOrderByCreatedAtDesc();
+}`,
+          },
+        ],
+      },
+      {
+        id: 'blog-stage-api',
+        phase: 'backend',
+        title: 'Stage 2：條件查詢 + 發布切換 API',
+        intro: '這次 GET 要支援「可選參數」：帶 published=true 就篩選，不帶就回傳全部，這是後台系統很常見的寫法。',
+        verify: {
+          id: 'verify-blog-crud',
+          label: '自動驗收：草稿/發布流程 + 驗證 + 刪除',
+          description: '建立一篇草稿，確認已發布列表看不到它；呼叫發布 API 後，確認它出現在已發布列表；確認空白標題被擋下；刪除後確認真的消失。',
+        },
+        steps: [
+          {
+            id: 'blog-dto-controller',
+            title: '建立 PostRequest + PostController',
+            instruction: 'PostRequest 用 @NotBlank 驗證 title、body。Controller：GET 用 @RequestParam(required = false) Boolean published 決定要不要篩選；PATCH /{id}/publish 讀出 entity、呼叫 publish()、save 回去（JPA 的 dirty checking 其實存不存都可以，但顯式 save 更清楚）；DELETE 跟留言板一樣用 existsById 檢查。',
+            checkpoint: '完成後按下方「執行自動驗收」，全部項目通過。',
+            hint: `package com.example.react_learning.blog;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record PostRequest(
+        @NotBlank String title,
+        @NotBlank String body
+) {}
+
+// PostController.java
+package com.example.react_learning.blog;
+
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import java.util.NoSuchElementException;
+
+@RestController
+@RequestMapping("/api/posts")
+public class PostController {
+    private final PostRepository postRepository;
+
+    public PostController(PostRepository postRepository) {
+        this.postRepository = postRepository;
+    }
+
+    @GetMapping
+    public List<PostEntity> getPosts(@RequestParam(required = false) Boolean published) {
+        // published=true 時只回傳已發布文章；沒帶這個參數（null）就回傳全部，方便後台管理畫面看草稿。
+        if (Boolean.TRUE.equals(published)) {
+            return postRepository.findByPublishedTrueOrderByCreatedAtDesc();
+        }
+        return postRepository.findAll();
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public PostEntity createPost(@Valid @RequestBody PostRequest request) {
+        return postRepository.save(new PostEntity(request.title(), request.body()));
+    }
+
+    @PatchMapping("/{id}/publish")
+    public PostEntity publishPost(@PathVariable Long id) {
+        PostEntity post = postRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("文章不存在：" + id));
+        post.publish();
+        return postRepository.save(post);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePost(@PathVariable Long id) {
+        if (!postRepository.existsById(id)) {
+            throw new NoSuchElementException("文章不存在：" + id);
+        }
+        postRepository.deleteById(id);
+    }
+}`,
+          },
+        ],
+      },
+      {
+        id: 'blog-stage-postgres',
+        phase: 'backend',
+        title: 'Stage 3：接上真正的外部 PostgreSQL（選用進階挑戰）',
+        intro: '跟留言板那題接 MySQL 的道理完全一樣，只是這次換 PostgreSQL，而且多了 pgAdmin 這個網頁 GUI 可以直接看資料表。如果這台機器不能跑 Docker，可以先跳過，之後在能跑 Docker 的機器上再做這個 Stage。',
+        steps: [
+          {
+            id: 'blog-use-postgres',
+            title: '用 PostgreSQL 設定檔重新啟動後端',
+            instruction: '參考 16. 串接外部資料庫 的 PostgreSQL 練習：docker compose --profile postgres up -d 啟動 postgres 跟 pgadmin 容器，pom.xml 打開 postgresql 驅動註解，再用 --spring.profiles.active=postgres 啟動後端。',
+            checkpoint: '在 pgAdmin（http://localhost:5050）的 Query Tool 對 learning_lab 資料庫下 SELECT * FROM posts; 能看到透過 API 新增的文章，published 欄位的 true/false 也能在 GUI 上直接看到。',
+            hint: `# 1. 啟動 PostgreSQL + pgAdmin
+docker compose --profile postgres up -d
+
+# 2. pom.xml 打開 postgresql 驅動註解（參考 16. 串接外部資料庫）
+
+# 3. 用 postgres profile 啟動後端
+mvn spring-boot:run -Dspring-boot.run.profiles=postgres
+
+# 4. pgAdmin（http://localhost:5050）開 Query Tool 驗證：
+SELECT * FROM posts;`,
+          },
+        ],
+      },
+      {
+        id: 'blog-stage-frontend',
+        phase: 'frontend',
+        title: 'Stage 4：React 前端（列表 + 發布切換 + 刪除）',
+        intro: '做一個 MyBlogManager 元件，模擬後台管理頁面：看得到全部文章（含草稿），草稿有「發布」按鈕，已發布的文章顯示「已發布」標籤。',
+        steps: [
+          {
+            id: 'blog-fe',
+            title: '建立 MyBlogManager.jsx',
+            instruction: '一組 state 存文章陣列（用 GET /api/posts，不帶 published 參數，後台要看到全部含草稿）。每篇文章依 published 顯示不同狀態與按鈕：草稿顯示「發布」按鈕，已發布顯示「已發布」標籤跟「刪除」按鈕。',
+            checkpoint: '新增文章後預設顯示「草稿」，按下發布後畫面立即變成「已發布」，不用重新整理頁面。',
+            hint: `import { useEffect, useState } from 'react'
+
+export default function MyBlogManager() {
+  const [posts, setPosts] = useState([])
+  const [form, setForm] = useState({ title: '', body: '' })
+  const [error, setError] = useState('')
+
+  async function loadPosts() {
+    const response = await fetch('/api/posts')
+    setPosts(await response.json())
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    async function initialLoad() {
+      const response = await fetch('/api/posts')
+      const data = await response.json()
+      if (!cancelled) setPosts(data)
+    }
+    initialLoad()
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    const response = await fetch('/api/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    })
+    if (!response.ok) {
+      setError('建立失敗：title 和 body 都要填寫')
+      return
+    }
+    setForm({ title: '', body: '' })
+    await loadPosts()
+  }
+
+  async function handlePublish(id) {
+    await fetch(\`/api/posts/\${id}/publish\`, { method: 'PATCH' })
+    await loadPosts()
+  }
+
+  async function handleDelete(id) {
+    await fetch(\`/api/posts/\${id}\`, { method: 'DELETE' })
+    await loadPosts()
+  }
+
+  return (
+    <div className="info-card">
+      <h3>我的部落格後台</h3>
+      <form onSubmit={handleSubmit}>
+        <input
+          placeholder="文章標題"
+          value={form.title}
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
+        />
+        <input
+          placeholder="文章內容"
+          value={form.body}
+          onChange={(e) => setForm({ ...form, body: e.target.value })}
+        />
+        <button type="submit">新增草稿</button>
+      </form>
+      {error ? <p style={{ color: 'red' }}>{error}</p> : null}
+      <ul>
+        {posts.map((post) => (
+          <li key={post.id}>
+            <strong>{post.title}</strong>
+            {post.published ? (
+              <span> ✅ 已發布</span>
+            ) : (
+              <button type="button" onClick={() => handlePublish(post.id)}>發布</button>
+            )}
+            <button type="button" onClick={() => handleDelete(post.id)}>刪除</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}`,
+          },
+          {
+            id: 'blog-fe-mount',
+            title: '掛上頁面展示',
+            instruction: '在 App.jsx 最上面 import MyBlogManager，並在 InterviewProjectsSection 的 showcases 陣列裡，新增一筆 { id: \'project-blog\', component: <MyBlogManager /> }。',
+            checkpoint: '切換到「個人部落格文章管理」這個面試專案分頁時，成果展示區能看到部落格後台，新增、發布、刪除都正常運作。',
+            hint: `// App.jsx 最上面加：
+import MyBlogManager from './components/MyBlogManager'
+
+// showcases 陣列裡多加一筆：
+showcases={[
+  { id: 'project-shortlink', component: <MyShortLinks /> },
+  { id: 'project-expense', component: <MyExpenseTracker /> },
+  { id: 'project-auth', component: <MyAuthPanel /> },
+  { id: 'project-inventory', component: <MyInventory /> },
+  { id: 'project-comments', component: <MyCommentBoard /> },
+  { id: 'project-blog', component: <MyBlogManager /> },
+]}`,
+          },
+        ],
+      },
+    ],
+    interviewQuestions: [
+      {
+        question: '為什麼 GET /api/posts 要用 @RequestParam(required = false) Boolean published，而不是拆成兩個不同的 endpoint？',
+        answerHint: '這是「同一種資源、不同篩選條件」的標準做法：GET /api/posts 搭配可選的 query string，比起 /api/posts/all 和 /api/posts/published 兩個 endpoint 更符合 RESTful 風格（resource 是 posts，published 只是篩選條件，不應該變成路徑的一部分）。',
+      },
+      {
+        question: '為什麼用 Boolean（包裝類別）而不是 boolean（基本型別）接這個參數？',
+        answerHint: 'boolean 基本型別沒有「沒有值」這個狀態，只能是 true 或 false；Boolean 包裝類別多了 null，剛好對應「使用者沒有帶這個 query 參數」的情況，讓程式可以區分「沒篩選」跟「篩選為 false」。',
+      },
+      {
+        question: 'PATCH 和 PUT 有什麼差異？為什麼發布文章用 PATCH 不是 PUT？',
+        answerHint: 'PUT 語意是「用送過去的內容整個覆蓋這個資源」；PATCH 語意是「只更新其中一部分欄位」。發布文章只是把 published 從 false 改成 true，並不是要整篇文章的 title/body 全部重新覆蓋一次，用 PATCH 更符合語意。',
+      },
+      {
+        question: 'PostgreSQL 的 columnDefinition = "TEXT" 是做什麼的？H2 也需要特別處理嗎？',
+        answerHint: 'PostgreSQL 的 VARCHAR 預設有長度限制考量，文章內文這種長度不固定且可能很長的欄位，用 TEXT 型別更合適，不用事先猜一個長度上限。H2 為了相容多種資料庫語法，大多時候可以直接沿用同樣的 columnDefinition 設定，不太需要特別處理，這也是 H2 方便在地開發的原因之一。',
+      },
+      {
+        question: '這個練習跟留言板那題都用了「分層架構、換資料庫不改程式碼」，這個觀念在實務上還能用在哪裡？',
+        answerHint: '最常見的延伸是「測試用假的實作、正式環境用真的實作」：例如測試時用記憶體內的假 Repository 或 H2，正式環境換成真的資料庫；或是「開發用本地檔案、正式環境用雲端物件儲存（S3）」，只要都面向同一組介面寫程式，底層實作就可以自由替換，這是依賴反轉原則（Dependency Inversion）在實務上最常見的體現。',
+      },
+    ],
+  },
 ]
 
 export const dockerGuide = {
@@ -4096,6 +5624,212 @@ docker compose down -v`,
     {
       question: 'Dockerfile 的指令順序為什麼會影響 build 速度？',
       answerHint: '每行指令產生一層快取，某層輸入變了、它之後的所有層都要重做。所以把「少變的」（裝套件）放前面、「常變的」（COPY 程式碼）放後面，改程式碼時前面的層全部吃快取。',
+    },
+  ],
+}
+
+// ============================================================================
+// 16. 串接外部資料庫：把 H2 換成業界最常用的 MySQL / PostgreSQL
+//
+// 整個教學平台到現在都用 H2 檔案資料庫，優點是零安裝、新手友善；
+// 但正式產品幾乎不會真的用 H2——實務上資料庫是「獨立的一台伺服器」
+// （公司機房、雲端代管服務如 AWS RDS，或像這裡一樣用 Docker 容器模擬）。
+// 這裡用同一套 Task/Entity/Repository 程式碼，示範怎麼「不改一行 Java 程式碼」，
+// 只靠換依賴 + 換設定檔，就能把後端接到兩種最常見的資料庫：MySQL、PostgreSQL。
+// 專案根目錄已經準備好對應檔案：
+//   pom.xml（兩組驅動依賴，預設註解）
+//   application-mysql.properties / application-postgres.properties
+//   docker-compose.yml（mysql / postgres / pgadmin 服務，用 profiles 隔開，預設不會啟動）
+// ============================================================================
+export const externalDbGuide = {
+  title: '串接外部資料庫：MySQL / PostgreSQL 實戰',
+  subtitle: '同一套 Entity/Repository 程式碼，分別接上兩種業界最常用的資料庫，體會「資料庫實作被 JPA 隔離」的威力',
+  whyExternalDb: [
+    'H2 是教學用的「單機小抄」；MySQL／PostgreSQL 才是公司真實環境會用的資料庫，面試被問到「你怎麼串資料庫」時，H2 幾乎不會是答案。',
+    '整個練習的重點不是學兩種 SQL 方言，而是體會分層架構的價值：Controller/Service/Repository 完全不用改，只靠換 pom.xml 依賴 + 換 application-*.properties，就能切換資料庫——這正是「針對介面寫程式，不要針對實作寫程式」的具體展現。',
+    '同時練到 Docker Compose 的「多服務編排」與「profiles 條件啟動」，以及最常被新手搞混的容器網路觀念（localhost vs 服務名稱）。',
+  ],
+  comparisonTable: [
+    { aspect: '安裝方式', h2: '不用裝，內嵌在 jar 裡', mysql: '需要獨立伺服器／容器（docker compose --profile mysql up -d）', postgres: '需要獨立伺服器／容器（docker compose --profile postgres up -d）' },
+    { aspect: '典型用途', h2: '開發、學習、單元測試', mysql: '中小型網站、電商、CMS，生態系（主機商、教學資源）最成熟', postgres: '需要複雜查詢、JSON 欄位、嚴謹資料型別的系統，近年新創/資料工程首選' },
+    { aspect: 'GUI 管理介面', h2: '內建 /h2-console', mysql: '需另裝 MySQL Workbench / DBeaver / phpMyAdmin', postgres: '需另裝 pgAdmin（已含在 docker-compose）/ DBeaver' },
+    { aspect: '型別嚴謹度', h2: '寬鬆（接近 MySQL）', mysql: '較寬鬆，型別不符有時會自動轉型', postgres: '嚴格，型別不符直接報錯，較少「隱性 bug」' },
+    { aspect: 'Spring Boot 設定差異', h2: 'driver=org.h2.Driver，url=jdbc:h2:file:...', mysql: 'driver=com.mysql.cj.jdbc.Driver，url=jdbc:mysql://host:3306/db', postgres: 'driver=org.postgresql.Driver，url=jdbc:postgresql://host:5432/db' },
+  ],
+  stacks: [
+    {
+      id: 'extdb-mysql',
+      title: 'MySQL',
+      subtitle: '世界上最多網站在用的開源關聯式資料庫',
+      goal: '把 Task 功能的資料庫從 H2 換成 MySQL，體會「同一份程式碼，接不同資料庫」的分層價值。',
+      stages: [
+        {
+          id: 'extdb-mysql-stage-run',
+          title: 'Stage 1：用 Docker 啟動一台 MySQL',
+          intro: 'docker-compose.yml 已經寫好 mysql 服務，用 profiles 隔開避免跟 H2 預設行為衝突，練習時才手動啟動。',
+          steps: [
+            {
+              id: 'extdb-mysql-start',
+              title: '啟動 MySQL 容器',
+              instruction: '在專案根目錄打 docker compose --profile mysql up -d，只會啟動 mysql 服務（不影響預設的 app 服務）。打開 docker-compose.yml 看 mysql 那段：MYSQL_DATABASE/MYSQL_USER/MYSQL_PASSWORD 這三個環境變數，容器啟動時會自動幫你建好這個資料庫跟帳號，不用手動下 CREATE DATABASE。',
+              checkpoint: '執行 docker ps 看得到 react-learning-mysql 容器，STATUS 是 Up。',
+              hint: `docker compose --profile mysql up -d
+docker ps
+# 想直接進容器下 SQL 驗證也可以：
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab`,
+            },
+          ],
+        },
+        {
+          id: 'extdb-mysql-stage-driver',
+          title: 'Stage 2：加上 MySQL 驅動依賴',
+          intro: 'JPA/Hibernate 本身不知道怎麼跟 MySQL 溝通，需要靠「JDBC 驅動」這塊翻譯機。',
+          steps: [
+            {
+              id: 'extdb-mysql-dep',
+              title: '打開 pom.xml 的 mysql-connector-j 註解',
+              instruction: '打開專案根目錄的 pom.xml，找到「16. 串接外部資料庫練習」那一區塊，把 mysql-connector-j 那組 <dependency> 的註解拿掉（postgresql 那組維持註解，兩個資料庫驅動不用同時啟用）。這個依賴 scope 是 runtime：編譯期用不到它（程式只 import JPA 的介面），執行期 Spring Boot 才需要真正連線用的驅動類別。',
+              checkpoint: '你能解釋：為什麼 TaskRepository.java 完全不用改，就能從 H2 換成 MySQL？（答案：它只依賴 Spring Data JPA 的介面，實際上誰去执行 SQL 是驅動 + 設定檔決定的，Repository 程式碼完全不知道底層是哪種資料庫）',
+              hint: `<!-- pom.xml：取消這段註解 -->
+<dependency>
+    <groupId>com.mysql</groupId>
+    <artifactId>mysql-connector-j</artifactId>
+    <scope>runtime</scope>
+</dependency>`,
+            },
+          ],
+        },
+        {
+          id: 'extdb-mysql-stage-config',
+          title: 'Stage 3：用 Spring Profile 切換設定檔',
+          intro: 'application-mysql.properties 已經寫好連線設定，用 profile 機制讓它「疊加」在原本的 application.properties 上。',
+          steps: [
+            {
+              id: 'extdb-mysql-profile',
+              title: '用 mysql profile 啟動後端',
+              instruction: '打開 src/main/resources/application-mysql.properties 看連線字串怎麼寫（url/driver-class-name/username/password 都跟 H2 版的對應，只是值換掉）。接著用 mvn spring-boot:run -Dspring-boot.run.profiles=mysql 啟動（IDE 的 Run 設定也可以加 VM options -Dspring.profiles.active=mysql 或 Program arguments --spring.profiles.active=mysql）。',
+              checkpoint: 'Console 的啟動 log 看得到 Hibernate 印出的 SQL 是連去 MySQL（可以對照 docker exec 進去的 mysql client，SHOW TABLES; 看得到 tasks 表）。',
+              hint: `# Maven 方式
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+
+# 打包後用 jar 方式
+mvn clean package -DskipTests
+java -jar target/*.jar --spring.profiles.active=mysql
+
+# 驗證資料真的進了 MySQL（不是 H2）：
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW TABLES; SELECT * FROM tasks;"`,
+            },
+          ],
+        },
+      ],
+      interviewQuestions: [
+        {
+          question: '同一份 TaskRepository.java，為什麼接 H2 跟接 MySQL 都不用改程式碼？',
+          answerHint: 'Spring Data JPA 的 Repository 是對「介面」寫程式：Controller/Service 只呼叫 save()/findAll() 這些方法，實際上要翻成什麼 SQL、怎麼連線，是由 Hibernate + JDBC 驅動 + application.properties 決定的。這就是「依賴反轉 / 面向介面編程」帶來的好處：換資料庫只是換設定，不是改商業邏輯。',
+        },
+        {
+          question: 'spring.profiles.active 是做什麼的？',
+          answerHint: '讓同一包程式碼可以用不同設定檔啟動（dev/test/prod 常見三態）。Spring Boot 會先讀 application.properties 當基礎設定，再疊加 application-{profile}.properties 蓋掉同名的 key，沒提到的 key 維持基礎設定值。',
+        },
+        {
+          question: 'MYSQL_ROOT_PASSWORD 跟 MYSQL_USER/MYSQL_PASSWORD 有什麼差別？',
+          answerHint: 'root 是 MySQL 的超級管理員帳號，什麼都能做；MYSQL_USER/MYSQL_PASSWORD 是官方 image 幫你自動建立的「一般帳號」，只被授權存取 MYSQL_DATABASE 指定的那個資料庫。應用程式連線應該用一般帳號，不要讓 Spring Boot 直接用 root 連線（最小權限原則）。',
+        },
+        {
+          question: '容器間要怎麼讓 Spring Boot 連到 MySQL 容器？為什麼不能寫 localhost？',
+          answerHint: '如果 Spring Boot 是在「你的電腦本機」跑（不是也包成容器），因為 docker-compose 的 port 映射（3306:3306），用 localhost:3306 連得到。但如果 Spring Boot 本身也被包成容器一起用 compose 啟動，容器裡的 localhost 指的是容器自己，這時要改用「服務名稱」當主機名（例如 jdbc:mysql://mysql:3306/...），因為 compose 會把所有服務放進同一個虛擬網路，用服務名互相解析。',
+        },
+        {
+          question: 'ddl-auto=update 在正式環境為什麼不建議用？',
+          answerHint: 'update 是 Hibernate 自動比對 Entity 跟資料表結構幫你加欄位/建表，方便但不可控：改錯 Entity、漏寫欄位都可能悄悄改壞正式資料庫結構，而且無法回溯歷史變更。正式環境通常改用 ddl-auto=validate（只檢查不動手）+ Flyway/Liquibase 這類「資料庫遷移工具」，每次結構變更都寫成一支有版本編號的 SQL script，可追蹤、可回滾。',
+        },
+      ],
+    },
+    {
+      id: 'extdb-postgres',
+      title: 'PostgreSQL',
+      subtitle: '型別嚴謹、功能豐富，近年新創與資料工程團隊的熱門選擇',
+      goal: '把同一套 Task 功能接到 PostgreSQL，並用 pgAdmin 這個網頁 GUI 實際看一眼資料表。',
+      stages: [
+        {
+          id: 'extdb-pg-stage-run',
+          title: 'Stage 1：用 Docker 啟動 PostgreSQL + pgAdmin',
+          intro: 'docker-compose.yml 的 postgres 服務跟上面 mysql 是同樣的 profiles 隔離寫法，額外多了一個 pgadmin 服務方便用瀏覽器看資料。',
+          steps: [
+            {
+              id: 'extdb-pg-start',
+              title: '啟動 PostgreSQL 容器（連同 pgAdmin）',
+              instruction: '打 docker compose --profile postgres up -d，會一次啟動 postgres 跟 pgadmin 兩個服務（pgadmin 的 docker-compose 設定裡有 depends_on: postgres，確保資料庫先起來）。打開瀏覽器連 http://localhost:5050，用 PGADMIN_DEFAULT_EMAIL/PASSWORD（learner@example.com / learn123）登入。',
+              checkpoint: '在 pgAdmin 裡新增一個 Server 連線（Host 填 postgres，因為 pgAdmin 本身也是容器，要用服務名稱才連得到資料庫；帳密是 learner/learn123），能看到 learning_lab 這個資料庫。',
+              hint: `docker compose --profile postgres up -d
+docker ps
+# pgAdmin: http://localhost:5050 （帳號 learner@example.com / 密碼 learn123）
+# 新增 Server 時：
+#   Host name/address: postgres   ← 用服務名稱，不是 localhost！
+#   Port: 5432
+#   Username: learner / Password: learn123`,
+            },
+          ],
+        },
+        {
+          id: 'extdb-pg-stage-driver',
+          title: 'Stage 2：加上 PostgreSQL 驅動依賴',
+          intro: '跟 MySQL 一樣的道理，只是換一組驅動。',
+          steps: [
+            {
+              id: 'extdb-pg-dep',
+              title: '打開 pom.xml 的 postgresql 驅動註解',
+              instruction: '打開 pom.xml，把 postgresql 那組 <dependency> 的註解拿掉（如果剛剛為了練 MySQL 打開了 mysql-connector-j，記得先改回註解，同一次只啟用一組驅動，避免混淆）。',
+              checkpoint: '能說出這個依賴 scope=runtime 的原因（跟 MySQL 練習的 Stage 2 是一樣的道理：程式碼只面對 JPA 介面，不會直接 import 驅動類別）。',
+              hint: `<!-- pom.xml：取消這段註解 -->
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>`,
+            },
+          ],
+        },
+        {
+          id: 'extdb-pg-stage-config',
+          title: 'Stage 3：用 postgres profile 啟動並驗證',
+          intro: '一樣是疊加設定檔的機制，只是這次疊加 application-postgres.properties。',
+          steps: [
+            {
+              id: 'extdb-pg-profile',
+              title: '用 postgres profile 啟動後端',
+              instruction: '打開 application-postgres.properties 看連線設定（driver 是 org.postgresql.Driver，url 是 jdbc:postgresql://...）。用 mvn spring-boot:run -Dspring-boot.run.profiles=postgres 啟動，然後呼叫幾次 Task 的 API（新增/查詢），回到 pgAdmin 展開 learning_lab → Schemas → public → Tables，應該看得到 tasks 這張表跟剛剛新增的資料。',
+              checkpoint: '在 pgAdmin 的 Query Tool 下 SELECT * FROM tasks; 看得到剛剛透過 API 新增的資料。',
+              hint: `mvn spring-boot:run -Dspring-boot.run.profiles=postgres
+
+# 驗證：pgAdmin 裡對 learning_lab 資料庫開 Query Tool，執行：
+SELECT * FROM tasks;`,
+            },
+          ],
+        },
+      ],
+      interviewQuestions: [
+        {
+          question: 'PostgreSQL 跟 MySQL 最常被拿出來比較的差異是什麼？',
+          answerHint: 'PostgreSQL 型別檢查較嚴格、對 SQL 標準遵循度較高，內建更豐富的資料型別（如 JSONB、陣列）與進階功能（視窗函式、CTE、擴充套件如 PostGIS）；MySQL 的優勢是生態系成熟、幾乎所有主機商都原生支援、簡單場景效能調校資源多。沒有絕對的好壞，看團隊需求與既有生態系。',
+        },
+        {
+          question: 'pgAdmin 連線時 Host 要填 postgres 而不是 localhost，這是為什麼？',
+          answerHint: 'pgAdmin 本身也是 docker-compose 裡的一個容器（服務名 pgadmin），它跟 postgres 容器在同一個 compose 網路裡，彼此用「服務名稱」當主機名解析。容器裡的 localhost 永遠指向容器自己，不會指到旁邊的另一個容器，這是新手接容器化服務時最常踩的坑。',
+        },
+        {
+          question: '這個練習沒有自動驗收按鈕，要怎麼確認自己真的做對了？',
+          answerHint: '外部資料庫需要本機真的跑著 Docker 容器，平台在瀏覽器端沒辦法連進你的容器驗證，所以這類基礎設施題改用「checkpoint 自行確認」：用 pgAdmin/MySQL client 實際下 SQL 查詢，親眼看到資料真的進了對應的資料庫，比任何自動化勾勾都更有說服力——這也是實務上「設定對不對」常見的排查方式。',
+        },
+        {
+          question: '如果 MySQL 跟 PostgreSQL 的驅動依賴同時打開在 pom.xml 裡，會發生什麼事？',
+          answerHint: '不會編譯錯誤（兩個都是 runtime 的 JDBC 驅動，可以共存），但容易造成混淆、增加不必要的映像檔大小。正式專案應該只保留真正會用到的那一種驅動，而不是「全部都裝著以防萬一」。',
+        },
+        {
+          question: '為什麼 docker-compose.yml 要用 profiles 把 mysql/postgres 服務隔開，而不是讓它們跟 app 服務一起無條件啟動？',
+          answerHint: '這個專案預設是用 H2（檔案資料庫，打包在 app 容器內），平常 docker compose up -d 不需要也不應該順便啟動兩個額外的資料庫容器（浪費資源、佔用 port）。用 profiles 讓這些服務變成「選用」，只有明確下 --profile mysql/postgres 才會啟動，這是 compose 管理「多環境、多種可選服務」的標準做法。',
+        },
+      ],
     },
   ],
 }
