@@ -23,9 +23,15 @@ public class SecurityConfig {
                 // 索性就用 403 打發。但我們的 API 規格是「沒帶 token 或 token 無效 -> 401」，
                 // 所以要自己指定一個 AuthenticationEntryPoint，攔截「未認證」的例外並回 401。
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(unauthorizedEntryPoint()))
+                // H2 console 的畫面是用 <frame> 組出來的，Spring Security 預設會送出
+                // X-Frame-Options: DENY（防止 clickjacking），這會讓瀏覽器直接擋掉 H2 console
+                // 的內容，看起來就像「登入進不去 / 頁面空白」。這裡只放寬成 sameOrigin（只允許
+                // 同一個來源把自己嵌進 frame），不是整個關掉，安全性影響很小。
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/**").authenticated()
+                        .requestMatchers("/h2-console/**").permitAll()
                         .anyRequest().permitAll() // 其他既有的 /api/** 維持不受影響
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

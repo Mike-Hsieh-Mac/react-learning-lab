@@ -3805,6 +3805,7 @@ export default function MyExpenseTracker() {
       '先用生活比喻理解，再看程式碼會輕鬆很多：JWT token 就像一張「有防偽簽章的識別證」。你去警衛室（login）證明身分後，警衛（後端）發給你一張識別證（token），上面寫著你的名字，還蓋了一個只有警衛室才做得出來的防偽章（簽章）。之後你想進任何房間（受保護的 API），只要出示這張識別證，警衛掃一下防偽章確認沒被偽造、也還沒過期，就放行——警衛完全不需要記得「誰進來過」，這就是「無狀態（stateless）」的意思。',
       '整個練習其實只有 3 個角色在合作：AuthController/AuthService（負責「核發識別證」：註冊、登入）、JwtUtil（負責「做出防偽章」與「驗證防偽章」：產生/解析 token）、JwtAuthFilter + SecurityConfig（負責「站在每個房間門口的警衛」：每個請求進來前先檢查有沒有帶識別證，帶了就放行）。新手常卡住的地方，就是分不清楚這三者各自的職責邊界，下面用流程圖把「誰在什麼時間點做什麼事」畫出來。',
       '特別提醒 Stage 3 的兩個常見地雷：① JwtAuthFilter 沒有加 @Component，Spring 就不會把它當成 Bean，SecurityConfig 會直接啟動失敗（報錯 required a bean of type JwtAuthFilter that could not be found）。② 沒有自訂 AuthenticationEntryPoint 的話，「沒帶 token / token 失效」預設會回 403，而不是 apiContract 要求的 401——因為 Spring Security 在沒有 httpBasic()/formLogin() 的情況下，找不到「該怎麼引導使用者登入」，只好用最保守的 403 打發，所以要自己指定一個 entry point 直接回 401。',
+      '常見誤解澄清：「/api/auth/me 到底有沒有經過 Controller？」——答案是：有，而且跟 /register、/login 一樣，最後都是由 AuthController 裡的一個方法處理。真正不一樣的地方，是「在抵達 Controller 之前，多繞了一圈」。/register、/login 是 permitAll()，請求幾乎是直接從瀏覽器走到 Controller；但 /me 被標記成 authenticated()，所以請求會先經過 JwtAuthFilter 這個「警衛」——警衛檢查 Authorization header 裡的 token，驗證成功就在 SecurityContext 貼上「已驗證」標籤，然後呼叫 filterChain.doFilter(...) 把請求「放行」繼續往下走，最終還是會進到 AuthController 的 me() 方法；如果 token 沒帶對或沒帶，SecurityConfig 設定的規則會攔下來，呼叫自訂的 AuthenticationEntryPoint 直接回 401，這時候請求才真的「沒有進到 Controller」。所以精確的說法不是「/me 不透過 Controller」，而是「/me 多了一層 Filter 做身分檢查，檢查沒過才會在半路被擋下來；檢查通過的話，走的流程跟其他 API 完全一樣」。這也是為什麼 me() 方法的參數可以直接寫 Authentication authentication——因為 Filter 已經把「這個人是誰」準備好放進 SecurityContext，Controller 只是去讀出來而已，完全不用自己重新解析 token。',
     ],
     flowDiagram: `【流程 1】註冊 — 使用者第一次建立帳號
 瀏覽器                AuthController         AuthService              資料庫
@@ -4376,6 +4377,10 @@ showcases={[
     ],
     interviewQuestions: [
       {
+        question: '/api/auth/me 的運作為什麼跟 /register、/login 不一樣？別的 API 都是直接透過 Controller 接 request，為什麼 /me 感覺不是？',
+        answerHint: '其實 /me 最後一樣是由 AuthController 的 me() 方法處理，差別在於它前面多了一道關卡：因為 SecurityConfig 把 /api/auth/** 設成 authenticated()（只有 register/login 例外被設成 permitAll），所以請求會先經過 JwtAuthFilter 驗證 Authorization header 裡的 token。驗證成功，Filter 會把使用者資訊放進 SecurityContext 再放行，請求照樣送進 AuthController；驗證失敗，會被 SecurityConfig 的規則攔下來、由自訂的 AuthenticationEntryPoint 直接回 401，這時候才真的沒有進到 Controller。所以正確理解是「/me 多了一層 Filter 做前置身分檢查」，而不是「/me 不透過 Controller」。',
+      },
+      {
         question: 'Session 與 JWT（token-based）驗證的差異是什麼？',
         answerHint: 'Session 是「伺服器記住你」，資料存在伺服器（要跨機器就得共享 session）。JWT 是「伺服器什麼都不記，token 自己帶著身分資訊 + 簽章」，適合分散式/多台伺服器，缺點是 token 發出去前很難提前撤銷。',
       },
@@ -4411,6 +4416,11 @@ showcases={[
       'POST /api/products                          -> 201，建立商品（price >= 1、stock >= 0）',
       'GET  /api/products?page=0&size=5&sort=price,asc -> 200，分頁 + 排序結果（{ content, totalElements, ... }）',
       'POST /api/products/{id}/purchase             -> 200，扣 1 件庫存並回傳最新商品；庫存不足回 409；商品不存在回 404',
+    ],
+    conceptExplanation: [
+      'Pageable 的運作，拆成 4 步看：① Spring MVC 發現 Controller 方法的參數型別是 Pageable，就會自動啟用內建的 PageableHandlerMethodArgumentResolver，把 query string 裡的 page/size/sort 解析組成一個 Pageable 物件，完全不用自己寫 @RequestParam int page, int size...。② Pageable 本身只是「查詢條件」，裡面存著 getPageNumber()（第幾頁，從 0 開始）、getPageSize()（每頁幾筆）、getSort()（排序規則），還能換算出 getOffset()。③ 因為 ProductRepository extends JpaRepository，免費繼承了 findAll(Pageable) 方法，Spring Data JPA 在底層會先下一次 COUNT(*) 查出符合條件的總筆數，再下一次帶 ORDER BY ... LIMIT ... OFFSET ... 的真正查詢——排序和分頁都是資料庫做的，不是把全部資料撈進 Java 再用 List.sort() + subList() 切。④ 回傳的 Page<ProductEntity> 會自動序列化成 { content, totalElements, totalPages, number, size, first, last } 這種固定格式，前端不用自己算總頁數。',
+      'page/size/sort 這三個參數名字是 Spring Data Web 的「預設值」，不是語言層級寫死的規定：可以在 application.properties 用 spring.data.web.pageable.page-parameter=xxx（把 page 改名）、size-parameter=xxx、default-page-size=10 等設定全域覆蓋；也可以在單一方法上用 @PageableDefault(size = 10, sort = "price") 只改「沒帶參數時的預設值」（不改名字）。這個專案沒有做任何覆蓋，所以就是用 page/size/sort 這組內建預設名稱——這也是 Spring 框架很常見的「convention over configuration」哲學：先給一套合理預設，不想要才自己改。',
+      '想排序多個欄位時，一個常見誤解是寫成 sort=price,name,asc，以為 price 跟 name 可以各自對應不同方向。但 Spring 的解析規則是：一個 sort= 參數裡，最後一個 token（asc/desc）會套用到「這個參數列出的所有欄位」，所以 sort=price,name,asc 其實是 ORDER BY price ASC, name ASC（兩欄位方向相同，name 只是 price 相同時的 tie-breaker）。想要「不同欄位各自指定方向」，必須分開寫兩個 sort= 參數，疊加起來，例如 ?sort=price,desc&sort=name,asc，才會變成 ORDER BY price DESC, name ASC。一句話記憶：方向是綁在單一個 sort= 參數尾巴，每個欄位要各自的方向，就要各自開一個 sort=。',
     ],
     stages: [
       {
@@ -4660,6 +4670,14 @@ showcases={[
         answerHint: 'Spring Data JPA 會組出帶 LIMIT/OFFSET（或資料庫對應語法）與 ORDER BY 的查詢，page*size 算出 OFFSET，size 是 LIMIT，sort 直接接到 ORDER BY 後面。這些你完全不用手寫。',
       },
       {
+        question: 'page/size/sort 這幾個參數名是固定的嗎？可以改嗎？',
+        answerHint: '這是 Spring Data Web 的「預設值」，不是寫死規定：可以用 application.properties 的 spring.data.web.pageable.page-parameter / size-parameter 全域改名，或用 @PageableDefault(size = 10, sort = "price") 只改單一方法的預設值（不改名字）。這題能答出「預設值可被覆蓋」就展現了對 convention over configuration 的理解。',
+      },
+      {
+        question: '想依多個欄位排序、每個欄位方向不同，sort 要怎麼寫？寫成 sort=price,name,asc 對嗎？',
+        answerHint: '不對，那樣寫會讓 price 跟 name 都套用同一個方向（asc），因為一個 sort= 參數裡最後一個 token 會套用到這個參數列出的所有欄位。要讓不同欄位各自指定方向，必須分開寫兩個 sort= 疊加，例如 ?sort=price,desc&sort=name,asc，才會變成 ORDER BY price DESC, name ASC。',
+      },
+      {
         question: '@Version 樂觀鎖的原理是什麼？',
         answerHint: '每次 UPDATE 時，SQL 會多加 "AND version = ?" 這個條件；如果沒人搶先改過，條件成立、version +1；如果被搶先改過，WHERE 條件對不上，影響 0 筆，Hibernate 判斷這是衝突，丟出例外。',
       },
@@ -4691,6 +4709,11 @@ showcases={[
       'POST   /api/comments       -> 201，建立留言（author、content 都不能空白，content 長度上限 500）',
       'GET    /api/comments       -> 200，回傳所有留言，依建立時間「新到舊」排序',
       'DELETE /api/comments/{id}  -> 204，刪除留言；不存在回 404',
+    ],
+    conceptExplanation: [
+      '細心的話你會發現：這個練習的 CommentController 直接注入 CommentRepository，完全沒有 CommentService——這是刻意的設計，不是偷懶。對照一下其他專案就看得出規則：ShortLinkService 要處理「產生不重複短碼」的重試邏輯、AuthService 要處理密碼雜湊與發 JWT、ProductService 要處理樂觀鎖衝突重試，這些都是「不屬於 HTTP 層、也不屬於資料庫存取層」的真正業務邏輯，所以值得獨立成一層。',
+      'Comment 的三個 API 剛好相反：GET 就是轉呼叫 findAllByOrderByCreatedAtDesc()，POST 就是 new 一個 Entity 再 save，DELETE 只是多了兩行 existsById 檢查——每一步都已經被 DTO 驗證（@Valid）或 JPA 衍生查詢處理掉了，Controller 裡剩下的就真的只是「轉接」。如果硬是包一層 CommentService 進去，它所有方法會長得跟 Controller 一模一樣，只是多一層沒有意義的轉呼叫，業界把這種東西戲稱為「anemic service / 貧血層」，是會被嫌棄的反模式。',
+      '判斷原則就一句話：Controller 方法裡，除了呼叫 Repository 之外，還要不要做別的事？有（組合多個步驟、呼叫外部服務、處理特殊狀態機、重試邏輯……）才需要 Service；沒有的話，Service 層只是樣板噪音。這個專案刻意把「有 Service」（ShortLink/Auth/Inventory）跟「沒 Service」（Comment）放在同一份教材裡，就是要讓你親眼比較兩種情況，體會 Service 層不是規定要加的東西，而是「有沒有東西值得放進去」決定的。',
     ],
     stages: [
       {
@@ -4959,6 +4982,10 @@ showcases={[
       },
     ],
     interviewQuestions: [
+      {
+        question: 'CommentController 直接注入 CommentRepository，為什麼不像 ShortLink/Auth/Inventory 一樣包一層 Service？',
+        answerHint: '判斷原則是「Controller 方法裡，除了呼叫 Repository 之外，還要不要做別的事」。ShortLink 要重試產生不重複短碼、Auth 要雜湊密碼與發 JWT、Inventory 要處理樂觀鎖重試，這些都是真正的業務邏輯，值得獨立成 Service。Comment 的三個 API 每一步都已經被 DTO 驗證或 JPA 衍生查詢處理掉了，硬加一層 Service 只會變成跟 Controller 一模一樣的轉呼叫（anemic service 反模式），所以直接讓 Controller 打 Repository 更乾淨。',
+      },
       {
         question: '為什麼排序要用 findAllByOrderByCreatedAtDesc()，不要查全部資料回 Java 再用 Comparator 排？',
         answerHint: '資料庫對排序欄位（尤其有索引時）做排序，效率遠高於把所有資料搬到應用程式記憶體裡再排。而且資料庫端排序可以搭配分頁（只搬需要的那幾筆），Java 端排序通常得先撈出全部資料，資料量一大就會變成效能瓶頸與記憶體壓力。',
@@ -5742,6 +5769,11 @@ docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "
         {
           question: 'ddl-auto=update 在正式環境為什麼不建議用？',
           answerHint: 'update 是 Hibernate 自動比對 Entity 跟資料表結構幫你加欄位/建表，方便但不可控：改錯 Entity、漏寫欄位都可能悄悄改壞正式資料庫結構，而且無法回溯歷史變更。正式環境通常改用 ddl-auto=validate（只檢查不動手）+ Flyway/Liquibase 這類「資料庫遷移工具」，每次結構變更都寫成一支有版本編號的 SQL script，可追蹤、可回滾。',
+        },
+        {
+          question: '把 Entity 欄位改名稱（或改型別、刪欄位），ddl-auto=update 會幫我把既有資料庫也跟著改嗎？',
+          answerHint:
+            'update 模式只會做「加法」：新增 Entity 會自動 CREATE TABLE、新增欄位會自動 ALTER TABLE ADD COLUMN。但「改名稱」「改型別」「刪欄位」它完全不會動手——因為 Hibernate 只比對「Entity 有、資料表沒有」的欄位，沒辦法分辨你是「把 name 改名成 productName」還是「新增一個叫 productName、跟 name 無關的全新欄位」，兩者在資料庫結構上長得一模一樣。所以改名稱的結果是：舊欄位 name 還留在資料表裡（資料也還在），同時多出一個空的新欄位 productName，而不是真的被改名。型別變更、刪欄位也是同樣道理：風險太高，Hibernate 選擇什麼都不做，寧可留著不用的舊結構，也不要貿然替你執行有破壞性的 ALTER/DROP。想要真正做到改名、改型別、刪欄位，要靠 Flyway/Liquibase 手寫遷移腳本（例如 RENAME COLUMN），或是重新建立資料庫/開發環境直接砍掉重建。',
         },
       ],
     },

@@ -14,6 +14,7 @@ import MyTaskBoard from './components/MyTaskBoard'
 import MyShortLinks from './components/MyShortLinks'
 import MyExpenseTracker from './components/MyExpenseTracker'
 import MyAuthPanel from './components/MyAuthPanel'
+import MyInventory from './components/MyInventory'
 import { javaConceptQuizzes } from './javaPractice'
 import {
   brokenCodeExercises,
@@ -3475,6 +3476,10 @@ function App() {
           {
             id: 'project-auth',
             component: <MyAuthPanel />
+          },
+          {
+            id: 'project-inventory',
+            component: <MyInventory />
           }
         ]}
       />
