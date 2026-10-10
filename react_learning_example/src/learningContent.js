@@ -5906,41 +5906,178 @@ export const testingGuide = {
     {
       id: 'testing-stage-unit',
       title: 'Stage 1：純 Mockito 單元測試（ShortLinkService）',
-      intro: 'ShortLinkService.generateUniqueCode() 有一個「產生碰撞就重試」的 while 迴圈，這是這個專案裡少數「有商業邏輯值得單獨測」的地方，很適合當單元測試的第一個練習對象。',
+      intro:
+        'ShortLinkService.generateUniqueCode() 有一個「產生碰撞就重試」的 while 迴圈，這是這個專案裡少數「有商業邏輯值得單獨測」的地方。這個 Stage 會把「怎麼從 0 開始寫出一個會動的單元測試」拆成很細的步驟，包含檔案要放哪裡、每個 annotation 實際在做什麼、怎麼執行、怎麼看懂結果。',
       steps: [
         {
-          id: 'testing-unit-setup',
-          title: '認識 @Mock / @InjectMocks 的角色',
+          id: 'testing-unit-concept',
+          title: '第 0 步：先搞懂「單元測試」跟你之前看過的驗收測試差在哪',
           instruction:
-            '@Mock 建立一個假的 ShortLinkRepository（所有方法預設回傳 null/空值，要自己用 when(...).thenReturn(...) 指定行為）。@InjectMocks 建立真正的 ShortLinkService，並把上面的假 Repository 自動塞進它的建構子。整個測試過程中，沒有任何 Spring 容器、沒有任何資料庫連線被啟動。',
-          checkpoint: '你能解釋為什麼這種測試「跑得特別快」（提示：少了什麼東西沒被啟動）。',
-          hint: `@ExtendWith(MockitoExtension.class)
-class ShortLinkServiceTest {
-    @Mock
-    private ShortLinkRepository shortLinkRepository;
+            '你在「14. 面試級全端專案」裡看過的 verify-comments-crud 那種驗證，是在瀏覽器裡用 fetch 打真正的 API，要先把後端整個啟動起來才能測，測的是「前端打 API 到後端整條路通不通」。單元測試完全不一樣：它不透過瀏覽器、不透過 HTTP、甚至不啟動 Spring，而是直接在 Java 程式碼裡 new 一個物件、呼叫它的方法、檢查回傳值對不對。目標是「只測一小塊程式碼本身的邏輯」，排除資料庫、網路、框架這些會讓測試變慢、變不穩定的因素。ShortLinkService.generateUniqueCode() 這段「如果代碼重複就重新產生」的 while 迴圈，就是一段「邏輯」，適合單獨拉出來測。',
+          checkpoint: '你能說出「單元測試」跟「打 API 驗收」這兩種測試，各自測的是哪一層、為什麼要分開做。',
+          hint: `對照表：
+- 驗收測試（之前的 verify-xxx-crud）：瀏覽器 → fetch → HTTP → Controller → Repository → 資料庫
+  整條路都要是真的，測「系統接起來動不動」。
+- 單元測試（這個 Stage）：Java 測試方法 → new/呼叫 Service 的方法
+  Repository 用假的替換掉，測「這段邏輯本身對不對」，不需要資料庫、不需要啟動網頁伺服器。`,
+        },
+        {
+          id: 'testing-unit-file-location',
+          title: '第 1 步：測試檔案要建立在哪裡、檔名怎麼取',
+          instruction:
+            '這個專案的主程式碼放在 src/main/java/com/example/react_learning/，測試程式碼要放在「鏡像」的路徑 src/test/java/com/example/react_learning/，而且套件（package）要跟你要測的類別一模一樣。因為 ShortLinkService 在 src/main/java/com/example/react_learning/shortlink/ShortLinkService.java，所以測試檔案要建立在 src/test/java/com/example/react_learning/shortlink/ShortLinkServiceTest.java。檔名規則是「被測類別名稱 + Test」，Maven 的測試執行工具（Surefire）預設只會自動尋找並執行檔名符合 *Test.java / Test*.java / *Tests.java 這幾種命名規則的檔案，取別的名字不會被自動執行到。',
+          checkpoint: '在檔案總管裡能找到 src/test/java/com/example/react_learning/shortlink/ 這個資料夾（如果還沒有就新建），並確認裡面要放的檔名是 ShortLinkServiceTest.java。',
+          hint: `src/
+  main/java/com/example/react_learning/shortlink/ShortLinkService.java   ← 被測的程式碼
+  test/java/com/example/react_learning/shortlink/ShortLinkServiceTest.java ← 測試程式碼，package 要跟上面一致
 
-    @InjectMocks
-    private ShortLinkService shortLinkService;
+package com.example.react_learning.shortlink; // 跟 ShortLinkService 同一個 package
+
+class ShortLinkServiceTest {
+    // 測試方法會寫在這裡面
 }`,
         },
         {
-          id: 'testing-unit-retry',
-          title: '測「產生碰撞就重試」的邏輯',
+          id: 'testing-unit-dependencies',
+          title: '第 2 步：確認專案已經有 JUnit 5 + Mockito（不用額外安裝）',
           instruction:
-            '用 when(repo.findByCode(anyString())).thenReturn(第一次回傳已存在, 第二次回傳empty) 模擬「第一次產生的代碼剛好撞號，重試後第二次沒撞號」。驗證 createLink() 最後呼叫了 2 次 findByCode，而不是只呼叫 1 次就直接用撞號的代碼存進去。',
-          checkpoint: '測試會過，且能看懂 verify(repo, times(2)).findByCode(anyString()) 在驗證什麼。',
-          hint: `@Test
-void createLink_retriesGeneratingCode_whenFirstAttemptCollides() {
-    when(shortLinkRepository.findByCode(anyString()))
-            .thenReturn(Optional.of(new ShortLinkEntity("existing", "https://taken.example", Instant.now())))
-            .thenReturn(Optional.empty());
+            '打開 pom.xml，找到 spring-boot-starter-test 這個依賴（本來就有，是 Spring Initializr 預設加的）。這一個依賴其實背後打包了一整組測試工具：JUnit 5（寫測試方法、跑測試、判斷成功失敗的框架）、Mockito（製造假物件的工具）、AssertJ（讓斷言可以寫成 assertThat(x).isEqualTo(y) 這種好讀的語法）。也就是說，你不用額外在 pom.xml 加任何東西，就可以直接開始寫 Mockito 的測試——這也是為什麼它的 scope 是 test：只有跑測試的時候才會用到，正式執行 jar 檔不會包含這些工具。',
+          checkpoint: '在 pom.xml 裡找到 <artifactId>spring-boot-starter-test</artifactId> 這段，確認 <scope>test</scope>。',
+          hint: `<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-test</artifactId>
+    <scope>test</scope>
+</dependency>
+<!-- 這一個依賴 = JUnit 5 + Mockito + AssertJ，三個工具包一起來 -->`,
+        },
+        {
+          id: 'testing-unit-first-test',
+          title: '第 3 步：寫一個「什麼都還沒測」的最小測試，先確認環境是通的',
+          instruction:
+            '在真正寫複雜邏輯之前，先寫一個最簡單、一定會過的測試方法，目的是確認「檔案位置對、package 對、JUnit 認得到這個測試」。一個測試方法的三個規則：1) 要加 @Test 這個 annotation（告訴 JUnit「這個方法是一個測試，不是普通方法」）；2) 方法不能有回傳值（必須是 void）；3) 方法不能有參數。寫完存檔後，在 IDE 裡這個方法左邊通常會出現一個綠色的執行箭頭（▶），點下去就能單獨執行這一個測試方法。',
+          checkpoint: '點擊綠色箭頭執行後，IDE 下方的測試結果面板顯示綠色勾勾（通過），而不是紅色叉叉。',
+          hint: `package com.example.react_learning.shortlink;
+
+import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+
+class ShortLinkServiceTest {
+
+    @Test
+    void sanityCheck_environmentIsWorking() {
+        // 這個測試不測任何真正的邏輯，只是先確認「測試環境真的有跑起來」
+        assertThat(1 + 1).isEqualTo(2);
+    }
+}`,
+        },
+        {
+          id: 'testing-unit-setup',
+          title: '第 4 步：逐一拆解 @ExtendWith / @Mock / @InjectMocks 分別在做什麼',
+          instruction:
+            '這三個 annotation 一定要一起理解，缺一個都會出問題：\n\n' +
+            '① @ExtendWith(MockitoExtension.class) 寫在「class 上面」：告訴 JUnit 5「這個測試類別需要讓 Mockito 介入處理」，沒有這一行，下面的 @Mock / @InjectMocks 完全不會生效（欄位會是 null）。\n\n' +
+            '② @Mock private ShortLinkRepository shortLinkRepository：請 Mockito 「憑空生出」一個 ShortLinkRepository 的假物件（不需要 ShortLinkRepository 有任何實作，因為它本來就只是一個 interface）。這個假物件所有方法預設回傳 null（物件）或空集合（List）或 false（boolean），要自己用 when(...).thenReturn(...) 指定遇到什麼輸入要回傳什麼。\n\n' +
+            '③ @InjectMocks private ShortLinkService shortLinkService：請 Mockito 建立一個「真正的」ShortLinkService 物件（這個不是假的，所有邏輯程式碼都會真的執行），並自動把上面標記 @Mock 的假物件，塞進 ShortLinkService 建構子需要的參數裡。你完全不用自己寫 new ShortLinkService(shortLinkRepository)，Mockito 會在每個測試方法執行前自動幫你組好。',
+          checkpoint: '你能解釋：如果只有 @Mock 沒有 @InjectMocks，會發生什麼事（答案：你會有一個假的 Repository，但沒有「被測的本尊」ShortLinkService 可以呼叫）。',
+          hint: `package com.example.react_learning.shortlink;
+
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class) // ① 啟用 Mockito
+class ShortLinkServiceTest {
+
+    @Mock
+    private ShortLinkRepository shortLinkRepository; // ② 假的 Repository
+
+    @InjectMocks
+    private ShortLinkService shortLinkService; // ③ 真的 Service，自動裝好假 Repository
+}`,
+        },
+        {
+          id: 'testing-unit-arrange-act-assert',
+          title: '第 5 步：用 AAA（Arrange-Act-Assert）三段式寫出第一個「正常情況」測試',
+          instruction:
+            '每一個測試方法建議都照這三段寫，看久了會很習慣：\n\n' +
+            '【Arrange 準備】告訴假的 Repository「如果有人呼叫 findByCode 不管傳什麼字串，都回傳 Optional.empty()」（代表這個代碼沒有被佔用），這樣 while 迴圈第一次就會成功結束，不會進入重試。\n\n' +
+            '【Act 執行】真的呼叫 shortLinkService.createLink(...)，這一行會真的跑 ShortLinkService.java 裡的程式碼（包含那個 while 迴圈），只是迴圈裡呼叫 shortLinkRepository.findByCode(...) 時，呼叫到的是假物件，不會真的查資料庫。\n\n' +
+            '【Assert 驗證】檢查回傳的 ShortLink 物件，它的 targetUrl 欄位是不是等於你傳進去的網址。',
+          checkpoint: '這個測試會過，且你能分別指出程式碼裡哪幾行是 Arrange、哪一行是 Act、哪一行是 Assert。',
+          hint: `import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+
+@Test
+void createLink_whenCodeIsFree_savesAndReturnsShortLink() {
+    // Arrange：假的 Repository 不管收到什麼代碼都說「沒人用過」
+    when(shortLinkRepository.findByCode(anyString())).thenReturn(Optional.empty());
+
+    // Act：真的呼叫 Service 的方法
+    ShortLink result = shortLinkService.createLink(new ShortLinkRequest("https://example.com"));
+
+    // Assert：檢查結果
+    assertThat(result.targetUrl()).isEqualTo("https://example.com");
+}`,
+        },
+        {
+          id: 'testing-unit-verify',
+          title: '第 6 步：用 verify() 檢查「假物件有沒有被正確呼叫」，而不只是看回傳值',
+          instruction:
+            'assertThat(...) 只能檢查「回傳的結果對不對」，但有時候你更在意的是「過程中到底呼叫了哪些方法、呼叫了幾次」——這時候要用 Mockito 的 verify()。接續第 5 步的測試，加上一行 verify(shortLinkRepository).save(any(ShortLinkEntity.class))，這行的意思是「驗證 save() 這個方法剛好被呼叫了 1 次（預設檢查 1 次），參數是任何一個 ShortLinkEntity 物件」。如果 Service 裡忘記呼叫 save()（忘記存進資料庫），這個 verify 就會讓測試失敗，即使回傳值看起來是對的。',
+          checkpoint: '故意把 ShortLinkService.createLink() 裡的 shortLinkRepository.save(entity) 那一行註解掉，重新跑測試，確認測試會失敗並顯示類似「Wanted but not invoked」的訊息；跑完記得把註解拿掉還原。',
+          hint: `import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+
+@Test
+void createLink_whenCodeIsFree_savesAndReturnsShortLink() {
+    when(shortLinkRepository.findByCode(anyString())).thenReturn(Optional.empty());
 
     ShortLink result = shortLinkService.createLink(new ShortLinkRequest("https://example.com"));
 
     assertThat(result.targetUrl()).isEqualTo("https://example.com");
+    verify(shortLinkRepository).save(any(ShortLinkEntity.class)); // 驗證真的有存
+}`,
+        },
+        {
+          id: 'testing-unit-retry',
+          title: '第 7 步：進階情境——模擬「第一次產生的代碼剛好撞號」，驗證重試邏輯',
+          instruction:
+            '這是這個 Stage 真正的重點，也是為什麼要挑 ShortLinkService 來練習：它的 generateUniqueCode() 裡有一個 while(true) 迴圈，邏輯是「產生一組隨機代碼 → 問 Repository 這組代碼存不存在 → 存在就重新產生、不存在就使用」。但隨機產生的代碼在測試裡沒辦法控制它「剛好」撞號，所以改用另一招：讓假的 Repository 連續兩次被呼叫時，回傳不同的結果。when(...).thenReturn(A, B) 這種「串接寫法」的意思是：第 1 次呼叫 findByCode 回傳 A（模擬「這組代碼已經有人用了」），第 2 次（含之後）呼叫都回傳 B（模擬「這組代碼沒人用」）。因為迴圈第一次會因為「代碼已存在」而繼續跑，第二次才會成功跳出迴圈，等於間接驗證了「真的有重試這件事發生」。',
+          checkpoint: '能解釋 verify(shortLinkRepository, times(2)).findByCode(anyString()) 這一行：如果迴圈只跑一次就直接用撞號的代碼存進去（邏輯寫錯），這裡會抓到「實際呼叫次數不是 2 次」而測試失敗。',
+          hint: `import static org.mockito.Mockito.times;
+
+@Test
+void createLink_retriesGeneratingCode_whenFirstAttemptCollides() {
+    // Arrange：前一組代碼「已經存在」，逼迫迴圈重試一次；後一組代碼「沒人用」，讓迴圈能結束
+    when(shortLinkRepository.findByCode(anyString()))
+            .thenReturn(Optional.of(new ShortLinkEntity("existing", "https://taken.example", Instant.now())))
+            .thenReturn(Optional.empty());
+
+    // Act
+    ShortLink result = shortLinkService.createLink(new ShortLinkRequest("https://example.com"));
+
+    // Assert：結果本身沒問題
+    assertThat(result.targetUrl()).isEqualTo("https://example.com");
+    // Assert：而且「真的有重試」——findByCode 被呼叫了 2 次，不是只呼叫 1 次就直接用撞號的代碼
     verify(shortLinkRepository, times(2)).findByCode(anyString());
     verify(shortLinkRepository, times(1)).save(any(ShortLinkEntity.class));
 }`,
+        },
+        {
+          id: 'testing-unit-run-all',
+          title: '第 8 步：執行整個測試類別、看懂終端機裡的結果',
+          instruction:
+            '寫完所有測試方法後，不用一個一個點，可以在終端機下指令一次跑完這個類別所有測試：mvn test -Dtest=ShortLinkServiceTest。看輸出結果時注意這一行：Tests run: 4, Failures: 0, Errors: 0, Skipped: 0——Tests run 是總共跑了幾個 @Test 方法，Failures 是「斷言失敗」（例如 assertThat 或 verify 沒通過），Errors 是「程式碼本身丟了例外」（例如 NullPointerException），兩者都是 0 才算全部通過。如果看到 BUILD SUCCESS 就代表這次執行完全沒問題；看到 BUILD FAILURE 就要往上捲找第一個出現 FAILED 或 ERROR 的測試方法名稱，從那裡開始排查。',
+          checkpoint: '終端機顯示 BUILD SUCCESS，且 Tests run 的數字等於你這個檔案裡 @Test 方法的總數。',
+          hint: `mvn test -Dtest=ShortLinkServiceTest
+
+# 預期看到類似：
+# [INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+# [INFO] BUILD SUCCESS
+
+# 只想跑其中一個測試方法（精準定位問題時很好用）：
+mvn test -Dtest=ShortLinkServiceTest#createLink_retriesGeneratingCode_whenFirstAttemptCollides`,
         },
       ],
     },
@@ -5950,6 +6087,7 @@ void createLink_retriesGeneratingCode_whenFirstAttemptCollides() {
       intro:
         '這一關會踩到一個很真實的坑：這個專案全域啟用了 Spring Security（JwtAuthFilter），@WebMvcTest 預設不會排除自訂的 Filter，所以就算你只指定測 CommentController，JwtAuthFilter 還是會被建立，連帶需要它的建構子依賴 JwtUtil——解法是額外用 @MockitoBean 補上 JwtUtil 的假物件。',
       steps: [
+
         {
           id: 'testing-webmvc-setup',
           title: '用 MockMvc 模擬 HTTP 請求',
