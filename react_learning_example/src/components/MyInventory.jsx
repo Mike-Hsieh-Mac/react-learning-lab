@@ -38,6 +38,7 @@ export default function MyInventory() {
         })
         if (response.status === 409) {
             setMessage('手慢了，庫存被搶光了或剛被其他人買走，畫面已重新整理。')
+            setMessageColor('red')
             await loadProducts()
             return
         }

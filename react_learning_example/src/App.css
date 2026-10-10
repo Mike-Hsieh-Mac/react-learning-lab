@@ -7,6 +7,7 @@
   --code-border: rgba(148, 163, 184, 0.18);
   --th-color: rgb(228, 216, 54);
   --td-color: rgb(105, 223, 207);
+  --tab-btn-color: rgb(241, 236, 236);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,6 +18,7 @@
     --code-border: rgba(148, 163, 184, 0.14);
     --th-color: rgb(217, 96, 228);
     --td-color: rgb(129, 104, 240);
+    --tab-btn-color: #ffffff;
   }
 }
 
@@ -1761,4 +1763,34 @@ th, td {
 
 .col-id {
   width: 20%; /* 這一欄佔表格寬度的 20% */
+}
+
+.tab {
+  display: flex;
+  border-bottom: 1px solid #ccc;
+}
+
+.tab-btn {
+  padding: 10px 10px;
+  cursor: pointer;
+  border: none;
+  background: var(--tab-btn-color);
+}
+
+.tab-btn.active {
+  background: rgb(87, 230, 4);
+  border-bottom: 2px solid blue;
+}
+
+.tab-content {
+  display: none;
+  padding: 10px;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.widenRight {
+  margin-right: 8px;
 }

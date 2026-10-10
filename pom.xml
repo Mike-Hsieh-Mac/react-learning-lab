@@ -123,7 +123,56 @@
             <scope>runtime</scope>
         </dependency>
         -->
+
+        <!-- ====================================================================
+             17. 自動化測試練習
+             Spring Boot 4 把測試用的自動設定拆成跟各自 starter 對應的獨立模組
+             （就跟 H2 Console 被拆成 spring-boot-h2console 一樣），
+             spring-boot-starter-test 預設只內建最核心的 JUnit 5 + Mockito + AssertJ，
+             想用 @WebMvcTest / @DataJpaTest / TestRestTemplate 要另外加下面這三個依賴。
+             Testcontainers 則是「進階選學」：會真的去啟動一個 Docker 容器當測試資料庫，
+             所以這幾個依賴 + 對應的測試類別，只能在「有裝 Docker 的那台機器」上跑，
+             這台沒有 Docker 的機器可以先跳過，或是用 docker-compose 的 mysql/postgres
+             服務手動啟動後，改用一般的 @SpringBootTest 連真的 DB 測試。
+             ==================================================================== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-resttestclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.20.4</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>

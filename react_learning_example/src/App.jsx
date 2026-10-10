@@ -7,6 +7,7 @@ import CapstoneProjectSection from './components/CapstoneProjectSection'
 import InterviewProjectsSection from './components/InterviewProjectsSection'
 import DockerSection from './components/DockerSection'
 import ExternalDbSection from './components/ExternalDbSection'
+import TestingSection from './components/TestingSection'
 import HooksToolboxSection from './components/HooksToolboxSection'
 import JavaBasicsSection from './components/JavaBasicsSection'
 import RenderFlowSection from './components/RenderFlowSection'
@@ -15,6 +16,8 @@ import MyShortLinks from './components/MyShortLinks'
 import MyExpenseTracker from './components/MyExpenseTracker'
 import MyAuthPanel from './components/MyAuthPanel'
 import MyInventory from './components/MyInventory'
+import MyCommentBoard from './components/MyCommentBoard'
+import MyBlogManager from './components/MyBlogManager'
 import { javaConceptQuizzes } from './javaPractice'
 import {
   brokenCodeExercises,
@@ -57,6 +60,7 @@ const SECTION_LABELS = {
   interview: '14. 面試級全端專案',
   docker: '15. Docker 容器化實戰',
   externalDb: '16. 串接外部資料庫',
+  testing: '17. 自動化測試',
 }
 
 function readSavedLearningProgress() {
@@ -369,6 +373,7 @@ function App() {
   const [dockerChecks, setDockerChecks] = useState(() => savedLearningProgress.dockerChecks ?? {})
   const [externalDbChecks, setExternalDbChecks] = useState(() => savedLearningProgress.externalDbChecks ?? {})
   const [selectedExternalDbStackId, setSelectedExternalDbStackId] = useState('extdb-mysql')
+  const [testingChecks, setTestingChecks] = useState(() => savedLearningProgress.testingChecks ?? {})
   const [scenarioSelections, setScenarioSelections] = useState({})
   const [scenarioFeedback, setScenarioFeedback] = useState({})
   const [brokenCodeSelections, setBrokenCodeSelections] = useState({})
@@ -498,6 +503,7 @@ function App() {
       interviewVerifyResults,
       dockerChecks,
       externalDbChecks,
+      testingChecks,
       javaQuizResults,
       javaReadingResults,
       quizCorrectMap,
@@ -519,6 +525,7 @@ function App() {
     interviewVerifyResults,
     dockerChecks,
     externalDbChecks,
+    testingChecks,
     javaQuizResults,
     javaReadingResults,
     brokenCodeFeedback,
@@ -1956,6 +1963,10 @@ function App() {
 
   const handleToggleExternalDbStep = (stepId) => {
     setExternalDbChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
+  }
+
+  const handleToggleTestingStep = (stepId) => {
+    setTestingChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
   }
 
   // ------------------------------------------------------------------
@@ -3480,6 +3491,14 @@ function App() {
           {
             id: 'project-inventory',
             component: <MyInventory />
+          },
+          {
+            id: 'project-comments',
+            component: <MyCommentBoard />
+          },
+          {
+            id: 'project-blog',
+            component: <MyBlogManager />
           }
         ]}
       />
@@ -3498,6 +3517,12 @@ function App() {
         onSelectStack={setSelectedExternalDbStackId}
       />
 
+      <TestingSection
+        registerSectionRef={registerSectionRef}
+        testingChecks={testingChecks}
+        onToggleTestingStep={handleToggleTestingStep}
+      />
+
       <nav className="floating-nav" aria-label="快速導覽">
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'hero', logMessage: '已回到頁首總覽。' })}>
           回到頂部
@@ -3513,6 +3538,9 @@ function App() {
         </button>
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'docker' })}>
           Docker
+        </button>
+        <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'testing' })}>
+          自動化測試
         </button>
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'practice' })}>
           課程區

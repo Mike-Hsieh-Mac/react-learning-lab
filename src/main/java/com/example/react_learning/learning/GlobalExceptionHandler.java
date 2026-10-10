@@ -12,9 +12,29 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
+
+    // NoSuchElementException 常用在「找不到資源就丟例外」的寫法（例如 CommentController 刪除不存在的留言）。
+    // 沒有這個 handler 的話，它會被下面範圍更大的 handleUnexpected(Exception.class) 接住，
+    // 誤回 500，但明明「資源不存在」在語意上應該是 404——這正是寫測試時最容易抓到的那種 bug。
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<ApiErrorResponse> handleNotFound(
+            NoSuchElementException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                "NOT_FOUND",
+                exception.getMessage() != null ? exception.getMessage() : "找不到指定的資源。",
+                request.getRequestURI(),
+                Instant.now(),
+                List.of()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(
@@ -85,4 +105,5 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 }
+
 

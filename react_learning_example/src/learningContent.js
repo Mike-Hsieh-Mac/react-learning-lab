@@ -5866,4 +5866,251 @@ SELECT * FROM tasks;`,
   ],
 }
 
+// ============================================================================
+// 17. 自動化測試
+// 用這個專案裡已經真實存在的程式碼（CommentController / CommentRepository /
+// ShortLinkService）當教材，示範三種最常見的 Spring Boot 測試切片，
+// 以及一個「進階選學」的 Testcontainers 整合測試。
+// ============================================================================
+export const testingGuide = {
+  title: '自動化測試：從單元測試到 Testcontainers',
+  subtitle: '履歷上寫「有寫測試」之前，先搞懂這幾種測試到底在測什麼、為什麼要分層',
+  whyTesting: [
+    '面試幾乎必問「這個專案有寫測試嗎？」——有真正跑得過的測試，說服力遠大於口頭說「我知道 TDD」。',
+    '測試能在「改程式碼的當下」就抓到壞掉的地方，不用等到手動點網頁或上線後使用者回報才發現。這份教材寫測試時，就真的抓到一個 CommentController 刪除不存在留言會誤回 500（應該是 404）的 bug。',
+    '不同層級的測試，目的不一樣：單元測試測「商業邏輯本身」、Controller 切片測試測「HTTP 層接口」、Repository 切片測試測「查詢邏輯」、整合測試測「接起來是不是真的動」——分層能讓測試又快又準，不用每次都整個應用程式整套啟動。',
+  ],
+  concepts: [
+    {
+      term: '純 Mockito 單元測試',
+      analogy: '完全不開 Spring，只用假物件（Mock）換掉 Repository，測 Service 裡的 if/while/計算邏輯本身，跑起來是毫秒等級。',
+      command: '@ExtendWith(MockitoExtension.class) + @Mock + @InjectMocks',
+    },
+    {
+      term: '@WebMvcTest（Controller 層切片）',
+      analogy: '只載入 Web 層（Controller + 例外處理），Repository 用 @MockitoBean 假物件取代，測「HTTP 狀態碼對不對、Controller 呼叫 Repository 的方式對不對」。',
+      command: '@WebMvcTest(CommentController.class)',
+    },
+    {
+      term: '@DataJpaTest（Repository 層切片）',
+      analogy: '只載入 JPA 相關元件，自動換成記憶體版 H2，測「衍生查詢、@PrePersist 這些跟真正資料庫打交道的邏輯」，每個測試結束自動 rollback。',
+      command: '@DataJpaTest',
+    },
+    {
+      term: 'Testcontainers（進階選學，需要 Docker）',
+      analogy: '測試開始時真的用 Docker 啟動一個全新 MySQL 容器，整個 HTTP → Controller → Repository → 真實資料庫都跑過一遍，測完容器自動銷毀。跟你「這台不能跑 Docker」的情境完全對應：這份測試只能在你另一台能跑 Docker 的機器上執行。',
+      command: '@Testcontainers + @Container MySQLContainer',
+    },
+  ],
+  stages: [
+    {
+      id: 'testing-stage-unit',
+      title: 'Stage 1：純 Mockito 單元測試（ShortLinkService）',
+      intro: 'ShortLinkService.generateUniqueCode() 有一個「產生碰撞就重試」的 while 迴圈，這是這個專案裡少數「有商業邏輯值得單獨測」的地方，很適合當單元測試的第一個練習對象。',
+      steps: [
+        {
+          id: 'testing-unit-setup',
+          title: '認識 @Mock / @InjectMocks 的角色',
+          instruction:
+            '@Mock 建立一個假的 ShortLinkRepository（所有方法預設回傳 null/空值，要自己用 when(...).thenReturn(...) 指定行為）。@InjectMocks 建立真正的 ShortLinkService，並把上面的假 Repository 自動塞進它的建構子。整個測試過程中，沒有任何 Spring 容器、沒有任何資料庫連線被啟動。',
+          checkpoint: '你能解釋為什麼這種測試「跑得特別快」（提示：少了什麼東西沒被啟動）。',
+          hint: `@ExtendWith(MockitoExtension.class)
+class ShortLinkServiceTest {
+    @Mock
+    private ShortLinkRepository shortLinkRepository;
+
+    @InjectMocks
+    private ShortLinkService shortLinkService;
+}`,
+        },
+        {
+          id: 'testing-unit-retry',
+          title: '測「產生碰撞就重試」的邏輯',
+          instruction:
+            '用 when(repo.findByCode(anyString())).thenReturn(第一次回傳已存在, 第二次回傳empty) 模擬「第一次產生的代碼剛好撞號，重試後第二次沒撞號」。驗證 createLink() 最後呼叫了 2 次 findByCode，而不是只呼叫 1 次就直接用撞號的代碼存進去。',
+          checkpoint: '測試會過，且能看懂 verify(repo, times(2)).findByCode(anyString()) 在驗證什麼。',
+          hint: `@Test
+void createLink_retriesGeneratingCode_whenFirstAttemptCollides() {
+    when(shortLinkRepository.findByCode(anyString()))
+            .thenReturn(Optional.of(new ShortLinkEntity("existing", "https://taken.example", Instant.now())))
+            .thenReturn(Optional.empty());
+
+    ShortLink result = shortLinkService.createLink(new ShortLinkRequest("https://example.com"));
+
+    assertThat(result.targetUrl()).isEqualTo("https://example.com");
+    verify(shortLinkRepository, times(2)).findByCode(anyString());
+    verify(shortLinkRepository, times(1)).save(any(ShortLinkEntity.class));
+}`,
+        },
+      ],
+    },
+    {
+      id: 'testing-stage-webmvc',
+      title: 'Stage 2：@WebMvcTest 測 Controller 層（CommentController）',
+      intro:
+        '這一關會踩到一個很真實的坑：這個專案全域啟用了 Spring Security（JwtAuthFilter），@WebMvcTest 預設不會排除自訂的 Filter，所以就算你只指定測 CommentController，JwtAuthFilter 還是會被建立，連帶需要它的建構子依賴 JwtUtil——解法是額外用 @MockitoBean 補上 JwtUtil 的假物件。',
+      steps: [
+        {
+          id: 'testing-webmvc-setup',
+          title: '用 MockMvc 模擬 HTTP 請求',
+          instruction:
+            '@WebMvcTest(CommentController.class) 只載入 Web 層，MockMvc 讓你不用真的啟動 Tomcat、不用真的發 HTTP 封包，就能模擬 GET/POST/DELETE 請求並檢查回傳的狀態碼、JSON 內容。',
+          checkpoint: '能解釋為什麼要額外加 @MockitoBean private JwtUtil jwtUtil（不是因為 CommentController 用到它，而是 Spring Security 的 Filter 鏈需要它）。',
+          hint: `@WebMvcTest(CommentController.class)
+class CommentControllerTest {
+    @Autowired private MockMvc mockMvc;
+    @MockitoBean private CommentRepository commentRepository;
+    @MockitoBean private JwtUtil jwtUtil; // 補上 Security Filter 需要的依賴
+}`,
+        },
+        {
+          id: 'testing-webmvc-validation',
+          title: '驗證「空白內容被擋下回 400」且「Repository 完全沒被呼叫」',
+          instruction:
+            '送出 author/content 都是空字串的請求，驗證：1) HTTP 狀態碼是 400；2) commentRepository.save() 從頭到尾沒被呼叫過（因為驗證失敗在進到 Controller 方法「之前」就被 @Valid 擋下來了）。',
+          checkpoint: '用 verify(commentRepository, never()).save(any()) 驗證通過。',
+          hint: `mockMvc.perform(post("/api/comments")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CommentRequest("", ""))))
+        .andExpect(status().isBadRequest());
+
+verify(commentRepository, never()).save(any(CommentEntity.class));`,
+        },
+        {
+          id: 'testing-webmvc-bugfix',
+          title: '抓到真正的 bug：刪除不存在的留言，原本回 500 不是 404',
+          instruction:
+            '寫 deleteComment_whenNotExists_returns404 這個測試時會發現：CommentController 丟出 NoSuchElementException，但 GlobalExceptionHandler 原本只有處理 MethodArgumentNotValidException / ResponseStatusException / 通用 Exception，NoSuchElementException 掉進「通用 Exception」那個 catch-all handler，誤回 500。修法：在 GlobalExceptionHandler 新增一個專門處理 NoSuchElementException 的 @ExceptionHandler，回 404。',
+          checkpoint: '補上 handler 後，測試從失敗變成通過——這就是「寫測試的當下抓到真實 bug」的具體例子。',
+          hint: `@ExceptionHandler(NoSuchElementException.class)
+public ResponseEntity<ApiErrorResponse> handleNotFound(
+        NoSuchElementException exception, HttpServletRequest request) {
+    ApiErrorResponse response = new ApiErrorResponse(
+            HttpStatus.NOT_FOUND.value(), "NOT_FOUND",
+            exception.getMessage(), request.getRequestURI(), Instant.now(), List.of());
+    return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+}`,
+        },
+      ],
+    },
+    {
+      id: 'testing-stage-datajpa',
+      title: 'Stage 3：@DataJpaTest 測 Repository 層（CommentRepository）',
+      intro:
+        'findAllByOrderByCreatedAtDesc() 是 Spring Data JPA 依方法名稱「自動生成」的查詢，拼字打錯、排序方向寫反，編譯期完全不會報錯，只有真的跑一次資料庫查詢才測得出來。',
+      steps: [
+        {
+          id: 'testing-datajpa-sort',
+          title: '驗證排序衍生查詢真的「新到舊」',
+          instruction:
+            '存兩筆留言（中間 sleep 一下確保時間不同），呼叫 findAllByOrderByCreatedAtDesc()，驗證回傳陣列第一筆是「比較晚存入」的那筆。',
+          checkpoint: '斷言 result.get(0).getId() 等於後存入那筆的 id。',
+          hint: `@DataJpaTest
+class CommentRepositoryTest {
+    @Autowired private CommentRepository commentRepository;
+
+    @Test
+    void findAllByOrderByCreatedAtDesc_returnsNewestFirst() throws InterruptedException {
+        CommentEntity older = commentRepository.save(new CommentEntity("A", "比較舊的留言"));
+        Thread.sleep(5);
+        CommentEntity newer = commentRepository.save(new CommentEntity("B", "比較新的留言"));
+
+        List<CommentEntity> result = commentRepository.findAllByOrderByCreatedAtDesc();
+
+        assertThat(result.get(0).getId()).isEqualTo(newer.getId());
+    }
+}`,
+        },
+        {
+          id: 'testing-datajpa-prepersist',
+          title: '驗證 @PrePersist 真的有自動補上 createdAt',
+          instruction:
+            '建立一個全新的 CommentEntity（還沒存進資料庫），先斷言 getCreatedAt() 是 null；呼叫 save() 之後再斷言它「不是 null」——這樣才是真正驗證到 @PrePersist 有在「存進資料庫的那一刻」被觸發，而不是建構子就設好值。',
+          checkpoint: '兩個斷言都通過：存之前是 null，存之後不是 null。',
+          hint: `CommentEntity comment = new CommentEntity("Mike", "測試 @PrePersist");
+assertThat(comment.getCreatedAt()).isNull();
+
+CommentEntity saved = commentRepository.save(comment);
+assertThat(saved.getCreatedAt()).isNotNull();`,
+        },
+      ],
+    },
+    {
+      id: 'testing-stage-testcontainers',
+      title: 'Stage 4（進階選學）：Testcontainers 真連 MySQL 整合測試',
+      intro:
+        '這一關「必須要有 Docker 在跑」才能執行——跟你串接外部資料庫、cross-machine 開發的情境完全一致。請把程式碼推上 GitHub，到你另一台能跑 Docker 的機器上 git pull，再執行這份測試。',
+      steps: [
+        {
+          id: 'testing-tc-container',
+          title: '用 @Container 宣告一次性 MySQL 容器',
+          instruction:
+            '@Container static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4")...，JUnit 的 Testcontainers 擴充套件會在測試類別開始前自動 docker run 起這個容器，測試結束後自動刪除——不是你 docker-compose.yml 裡那個常駐的 mysql 服務，是完全獨立、用完即丟的。',
+          checkpoint: '能說出這跟 docker-compose.yml 裡 mysql 服務的差異（一次性 vs 常駐）。',
+          hint: `@Testcontainers
+class CommentTestcontainersIntegrationTest {
+    @Container
+    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.4")
+            .withDatabaseName("learning_lab_test")
+            .withUsername("learner")
+            .withPassword("learn123");
+}`,
+        },
+        {
+          id: 'testing-tc-dynamicprops',
+          title: '用 @DynamicPropertySource 把連線資訊動態塞進 Spring',
+          instruction:
+            'MySQLContainer 啟動後，port 是隨機分配的，沒辦法事先寫死在 application.properties 裡。@DynamicPropertySource 讓你在 Spring 啟動「之前」用程式動態讀出容器實際的連線字串、帳號密碼，蓋掉設定值。',
+          checkpoint: '完整跑一次 CRUD（建立→查詢→刪除），確認資料真的進了這個臨時 MySQL 容器，而不是預設的 H2。',
+          hint: `@DynamicPropertySource
+static void overrideDatasourceProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", mysql::getJdbcUrl);
+    registry.add("spring.datasource.username", mysql::getUsername);
+    registry.add("spring.datasource.password", mysql::getPassword);
+}
+
+// 在沒有 Docker 的機器上想跳過這份測試：
+// mvn test -Dtest='!CommentTestcontainersIntegrationTest'`,
+        },
+      ],
+    },
+  ],
+  commonCommands: [
+    { command: 'mvn test', description: '跑整個專案所有測試（包含需要 Docker 的 Testcontainers 測試）。' },
+    {
+      command: "mvn test -Dtest='!CommentTestcontainersIntegrationTest'",
+      description: '排除某一個測試類別，適合在沒有 Docker 的機器上先跑其他測試。',
+    },
+    { command: 'mvn test -Dtest=CommentRepositoryTest', description: '只跑單一個測試類別，開發時快速驗證。' },
+    { command: 'mvn test -Dtest=CommentRepositoryTest#findAllByOrderByCreatedAtDesc_returnsNewestFirst', description: '只跑單一個測試方法，精準定位問題。' },
+  ],
+  interviewQuestions: [
+    {
+      question: '單元測試、@WebMvcTest、@DataJpaTest、Testcontainers 整合測試，實務上要怎麼分配比例？',
+      answerHint:
+        '常見比喻是「測試金字塔」：底層是大量、快速的單元測試（商業邏輯），中層是適量的切片測試（@WebMvcTest/@DataJpaTest，驗證跟框架的接線正不正確），頂層是少量、較慢的整合測試（Testcontainers，驗證整條流程真的通）。越底層的測試數量應該越多，因為跑得快、失敗時容易定位問題；越頂層的測試數量要越少，因為慢、環境依賴重，只留給最關鍵的端到端流程。',
+    },
+    {
+      question: '@WebMvcTest(CommentController.class) 明明只指定測一個 Controller，為什麼 JwtAuthFilter 還是被建立了？',
+      answerHint:
+        '@WebMvcTest 的切片規則是「保留跟 Web 層相關的元件」，而 Servlet Filter（包括自訂的 OncePerRequestFilter）被認定跟 Web 層相關，所以不會被排除，依然會被建立。JwtAuthFilter 的建構子需要 JwtUtil，而 JwtUtil 是 @Component（被切片排除），所以測試必須額外用 @MockitoBean 補上 JwtUtil 的假物件，否則整個 Spring 測試情境會因為「找不到 JwtUtil」組裝失敗。',
+    },
+    {
+      question: '@DataJpaTest 預設用記憶體版 H2，而不是接正式用的 jdbc:h2:file:./data/learning-lab，這樣測試結果可信嗎？',
+      answerHint:
+        '可信，因為測的是「JPA/Hibernate 查詢邏輯對不對」，H2 跟正式的 H2 檔案資料庫行為是一致的——真正要注意的是「換成 MySQL/PostgreSQL 之後行為會不會不一樣」，這種跨資料庫的風險才需要靠 Testcontainers 整合測試來補足（@DataJpaTest 測不出 MySQL 專屬的型別轉換或 SQL 方言差異）。',
+    },
+    {
+      question: '這次寫測試抓到 CommentController 刪除不存在的留言會回 500 而不是 404，這件事給你什麼啟發？',
+      answerHint:
+        '例外處理要「夠精確」：GlobalExceptionHandler 原本只有兜底的 Exception handler，任何沒被明確攔截的例外都會被當成「未預期的系統錯誤」回 500。但「資源不存在」在語意上應該是客戶端可以預期、可以處理的 404，不是系統出錯。這也說明了為什麼測試要覆蓋「失敗路徑」（找不到、驗證失敗），不能只測「成功路徑」，很多 bug 都藏在錯誤處理的細節裡。',
+    },
+    {
+      question: 'Testcontainers 整合測試需要本機有 Docker，這跟你「這台機器不能跑 Docker」的限制要怎麼共存？',
+      answerHint:
+        '用 Maven 的 -Dtest 排除語法（mvn test -Dtest=\'!CommentTestcontainersIntegrationTest\'）在沒有 Docker 的機器上跳過這份測試，其餘不需要 Docker 的測試（單元測試、@WebMvcTest、@DataJpaTest）正常執行；真正需要驗證「跟真實 MySQL 行為一致」時，再把程式碼推上 GitHub，到有 Docker 的那台機器上 git pull 後完整跑一次 mvn test。這正好也是 CI/CD 流程的雛形：不同測試可以依賴不同的執行環境。',
+    },
+  ],
+}
+
 
