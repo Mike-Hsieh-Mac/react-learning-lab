@@ -149,6 +149,19 @@ export default function ExternalDbSection({
                     <code>{step.hint}</code>
                   </pre>
                 </details>
+                {Array.isArray(step.troubleshooting) && step.troubleshooting.length > 0 && (
+                  <details className="mission-response">
+                    <summary>🛠️ 常見錯誤排查（{step.troubleshooting.length}）</summary>
+                    <div className="capstone-step-stack">
+                      {step.troubleshooting.map((item) => (
+                        <div key={item.issue} className="docker-concept-row">
+                          <strong>❗ {item.issue}</strong>
+                          <p>{item.fix}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
             ))}
           </div>
@@ -171,4 +184,5 @@ export default function ExternalDbSection({
     </section>
   )
 }
+
 

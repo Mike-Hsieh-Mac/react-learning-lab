@@ -5693,58 +5693,174 @@ export const externalDbGuide = {
         {
           id: 'extdb-mysql-stage-run',
           title: 'Stage 1：用 Docker 啟動一台 MySQL',
-          intro: 'docker-compose.yml 已經寫好 mysql 服務，用 profiles 隔開避免跟 H2 預設行為衝突，練習時才手動啟動。',
+          intro: 'docker-compose.yml 已經寫好 mysql 服務，用 profiles 隔開避免跟 H2 預設行為衝突，練習時才手動啟動。這個 Stage 的重點是：容器「跑起來」不等於「準備好能接受連線」，一定要照著下面的步驟一層一層確認，不要容器一啟動就馬上切下一步。',
           steps: [
             {
               id: 'extdb-mysql-start',
               title: '啟動 MySQL 容器',
-              instruction: '在專案根目錄打 docker compose --profile mysql up -d，只會啟動 mysql 服務（不影響預設的 app 服務）。打開 docker-compose.yml 看 mysql 那段：MYSQL_DATABASE/MYSQL_USER/MYSQL_PASSWORD 這三個環境變數，容器啟動時會自動幫你建好這個資料庫跟帳號，不用手動下 CREATE DATABASE。',
-              checkpoint: '執行 docker ps 看得到 react-learning-mysql 容器，STATUS 是 Up。',
+              instruction: '在專案根目錄打 docker compose --profile mysql up -d，只會啟動 mysql 服務（不影響預設的 app 服務）。打開 docker-compose.yml 看 mysql 那段：MYSQL_DATABASE/MYSQL_USER/MYSQL_PASSWORD 這三個環境變數，容器「第一次」啟動時會自動幫你建好這個資料庫跟帳號，不用手動下 CREATE DATABASE。注意：這個自動建帳號的動作只會在 volume 是全新、空的時候發生——如果你之前練過又砍掉重建過容器，但 mysql-data 這個 volume 沒有一起刪掉，MySQL 會沿用舊資料，環境變數不會重新套用。',
+              checkpoint: '執行 docker ps 看得到 react-learning-mysql 容器，STATUS 是 Up（不是 Restarting 或 Exited）。',
               hint: `docker compose --profile mysql up -d
 docker ps
-# 想直接進容器下 SQL 驗證也可以：
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab`,
+# 如果想砍掉重練（連帳號密碼問題一起重置），連 volume 一起刪：
+docker compose --profile mysql down -v
+docker compose --profile mysql up -d`,
+              troubleshooting: [
+                {
+                  issue: 'docker ps 看不到 react-learning-mysql，或 STATUS 一直是 Restarting',
+                  fix: '先用 docker compose --profile mysql logs mysql 看錯誤訊息。最常見原因是 port 3306 已經被你電腦上「本機安裝」的 MySQL／別的容器佔用，docker-compose.yml 的 ports 是 "3306:3306"，主機這邊的 3306 被佔用就會啟動失敗。確認方式：Windows 執行 netstat -ano | findstr 3306，看有沒有其他程式在用；有的話先停掉本機 MySQL 服務，或把 docker-compose.yml 改成 "3307:3306" 這種不同的主機 port（記得 application-mysql.properties 的 url 也要跟著改 port）。',
+                },
+                {
+                  issue: 'docker ps 看得到容器，但 STATUS 顯示 (health: starting) 很久都不會變成 healthy／Up',
+                  fix: 'MySQL 容器「剛啟動」跟「初始化完成、可以接受連線」是兩件事，第一次啟動要建資料庫、建帳號，通常需要 10~30 秒。耐心用 docker compose --profile mysql logs -f mysql 盯著看，看到一行 [Server] /usr/sbin/mysqld: ready for connections. 才算真正準備好，太早去啟動 Spring Boot 會連線失敗。',
+                },
+              ],
+            },
+            {
+              id: 'extdb-mysql-verify-container',
+              title: '進容器內部，直接確認資料庫跟帳號都建好了',
+              instruction: '在啟動 Spring Boot 之前，先獨立驗證「MySQL 本身」是通的，排除掉「到底是 MySQL 沒設定好，還是 Spring Boot 設定錯」這種混淆。用 docker exec 直接進容器下 mysql client，用 docker-compose.yml 裡設定的帳密（learner / learn123）登入，確認 learning_lab 這個資料庫存在。',
+              checkpoint: 'docker exec 指令成功登入（沒有 Access denied），下 SHOW DATABASES; 看得到 learning_lab，下 SELECT CURRENT_USER(); 顯示 learner@%，代表帳號密碼都正確、資料庫也建好了——這一步做完，之後如果 Spring Boot 連不上，問題就一定出在設定檔或網路，不會是 MySQL 本身的問題。',
+              hint: `# 進容器內部的 mysql client（帳密來自 docker-compose.yml 的 MYSQL_USER/MYSQL_PASSWORD）
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW DATABASES; SELECT CURRENT_USER();"
+
+# 如果想用「主機上」自己裝的 mysql client 連（而不是進容器），驗證 port 映射有沒有通：
+mysql -h 127.0.0.1 -P 3306 -ularner -plearn123 learning_lab -e "SELECT 1;"
+
+# 沒裝 mysql client 的話，用 PowerShell 測 port 有沒有通也可以（先驗證網路層）：
+Test-NetConnection -ComputerName 127.0.0.1 -Port 3306`,
+              troubleshooting: [
+                {
+                  issue: 'ERROR 1045 (28000): Access denied for user \'learner\'@\'...\'',
+                  fix: '密碼打錯，或是容器沿用了「舊的」volume（之前練習時密碼設定不同）。先確認指令打的帳密跟 docker-compose.yml 裡 MYSQL_USER/MYSQL_PASSWORD 完全一致；如果確定一致還是失敗，大機率是舊 volume 殘留，執行 docker compose --profile mysql down -v 把 volume 一起刪掉再重新 up -d（這會清空 MySQL 裡所有資料，練習階段可以放心清）。',
+                },
+                {
+                  issue: 'Test-NetConnection 顯示 TcpTestSucceeded: False',
+                  fix: '代表主機的 3306 根本連不到容器，先確認 docker ps 裡 PORTS 欄位有沒有 0.0.0.0:3306->3306/tcp；沒有的話表示 docker-compose.yml 的 ports 設定沒生效或容器還沒 healthy，回到上一步重新確認。如果你是在公司電腦、防火牆比較嚴，也可能是防火牆擋掉本機對 3306 的連線。',
+                },
+              ],
             },
           ],
         },
         {
           id: 'extdb-mysql-stage-driver',
           title: 'Stage 2：加上 MySQL 驅動依賴',
-          intro: 'JPA/Hibernate 本身不知道怎麼跟 MySQL 溝通，需要靠「JDBC 驅動」這塊翻譯機。',
+          intro: 'JPA/Hibernate 本身不知道怎麼跟 MySQL 溝通，需要靠「JDBC 驅動」這塊翻譯機。這一步最容易出的錯不是改錯程式碼，而是「改了但沒讓 IDE/Maven 真的吃到新設定」。',
           steps: [
             {
               id: 'extdb-mysql-dep',
               title: '打開 pom.xml 的 mysql-connector-j 註解',
-              instruction: '打開專案根目錄的 pom.xml，找到「16. 串接外部資料庫練習」那一區塊，把 mysql-connector-j 那組 <dependency> 的註解拿掉（postgresql 那組維持註解，兩個資料庫驅動不用同時啟用）。這個依賴 scope 是 runtime：編譯期用不到它（程式只 import JPA 的介面），執行期 Spring Boot 才需要真正連線用的驅動類別。',
-              checkpoint: '你能解釋：為什麼 TaskRepository.java 完全不用改，就能從 H2 換成 MySQL？（答案：它只依賴 Spring Data JPA 的介面，實際上誰去执行 SQL 是驅動 + 設定檔決定的，Repository 程式碼完全不知道底層是哪種資料庫）',
+              instruction: '打開專案根目錄的 pom.xml，找到「16. 串接外部資料庫練習」那一區塊，把 mysql-connector-j 那組 <dependency> 的註解拿掉（postgresql 那組維持註解，兩個資料庫驅動不用同時啟用）。這個依賴 scope 是 runtime：編譯期用不到它（程式只 import JPA 的介面），執行期 Spring Boot 才需要真正連線用的驅動類別。改完存檔後，一定要讓 IDE 重新載入 Maven 依賴（IntelliJ：右上角小象圖示「Reload All Maven Projects」，或 Maven 工具視窗按重新整理），不然 IDE 還是用舊的 classpath 執行，會在啟動時找不到驅動類別。',
+              checkpoint: '你能解釋：為什麼 TaskRepository.java 完全不用改，就能從 H2 換成 MySQL？（答案：它只依賴 Spring Data JPA 的介面，實際上誰去执行 SQL 是驅動 + 設定檔決定的，Repository 程式碼完全不知道底層是哪種資料庫）同時也能在 IntelliJ 的 Maven 面板 / External Libraries 裡實際看到 mysql-connector-j 這個 jar，代表依賴真的生效了。',
               hint: `<!-- pom.xml：取消這段註解 -->
 <dependency>
     <groupId>com.mysql</groupId>
     <artifactId>mysql-connector-j</artifactId>
     <scope>runtime</scope>
-</dependency>`,
+</dependency>
+
+# 命令列也可以直接確認依賴有沒有真的進到 classpath：
+mvn dependency:tree | Select-String mysql`,
+              troubleshooting: [
+                {
+                  issue: '啟動時噴錯 Cannot load driver class: com.mysql.cj.jdbc.Driver',
+                  fix: '90% 是忘了拿掉 pom.xml 裡的註解，或是拿掉了但 IDE/Maven 沒有 reload，還在用舊的 classpath 跑。先用 mvn dependency:tree | Select-String mysql 確認依賴真的存在；如果存在但 IDE 跑出來的還是報錯，試試「Reload Maven Project」或直接關掉重開 IDE 的 Run 設定再跑一次。',
+                },
+                {
+                  issue: 'pom.xml 改完存檔，IDE 左下角或編輯器沒有跳出「匯入變更」的提示',
+                  fix: 'IntelliJ 預設有些版本不會自動偵測，養成改完 pom.xml 就手動點一次 Maven 工具視窗的「重新整理」圖示（兩個箭頭循環的那個）的習慣，比較保險。',
+                },
+              ],
             },
           ],
         },
         {
           id: 'extdb-mysql-stage-config',
-          title: 'Stage 3：用 Spring Profile 切換設定檔',
-          intro: 'application-mysql.properties 已經寫好連線設定，用 profile 機制讓它「疊加」在原本的 application.properties 上。',
+          title: 'Stage 3：用 Spring Profile 切換設定檔，並「親眼」驗證真的連上 MySQL',
+          intro: 'application-mysql.properties 已經寫好連線設定，用 profile 機制讓它「疊加」在原本的 application.properties 上。這個 Stage 的核心問題就是題目問的：「怎麼樣才能驗證自己成功地連上 MySQL？」下面給四種由淺到深、互相印證的驗證方式，建議全部都做一遍。',
           steps: [
             {
               id: 'extdb-mysql-profile',
               title: '用 mysql profile 啟動後端',
-              instruction: '打開 src/main/resources/application-mysql.properties 看連線字串怎麼寫（url/driver-class-name/username/password 都跟 H2 版的對應，只是值換掉）。接著用 mvn spring-boot:run -Dspring-boot.run.profiles=mysql 啟動（IDE 的 Run 設定也可以加 VM options -Dspring.profiles.active=mysql 或 Program arguments --spring.profiles.active=mysql）。',
-              checkpoint: 'Console 的啟動 log 看得到 Hibernate 印出的 SQL 是連去 MySQL（可以對照 docker exec 進去的 mysql client，SHOW TABLES; 看得到 tasks 表）。',
-              hint: `# Maven 方式
+              instruction: '打開 src/main/resources/application-mysql.properties 看連線字串怎麼寫（url/driver-class-name/username/password 都跟 H2 版的對應，只是值換掉）。接著用 mvn spring-boot:run -Dspring-boot.run.profiles=mysql 啟動。如果你是在 IntelliJ 裡用綠色三角形 Run，要另外去 Run/Debug Configurations 把 Active profiles 欄位填 mysql（或在 Program arguments 加 --spring.profiles.active=mysql）——直接按 IDE 的 Run 鍵「不會」自動套用 Maven 指令列的 -D 參數，這是新手最常忽略的一步，結果變成還是連著 H2 卻一直疑惑「設定明明是對的為什麼沒連到 MySQL」。',
+              checkpoint: '啟動 log 從頭到尾捲過一遍，確定沒有紅色的 Exception／Caused by；同時要親眼看到下面「驗證連線成功」那一步列出的證據，而不是「沒報錯就當作成功」。',
+              hint: `# 方式一：Maven 指令啟動並指定 profile
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 
-# 打包後用 jar 方式
+# 方式二：打包後用 jar 啟動
 mvn clean package -DskipTests
 java -jar target/*.jar --spring.profiles.active=mysql
 
-# 驗證資料真的進了 MySQL（不是 H2）：
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW TABLES; SELECT * FROM tasks;"`,
+# IntelliJ Run 設定（Run/Debug Configurations）：
+#   Active profiles: mysql
+#   或 Program arguments: --spring.profiles.active=mysql`,
+              troubleshooting: [
+                {
+                  issue: '啟動 log 完全沒提到 mysql，看起來還是連著 H2（例如看到 jdbc:h2:file 字樣）',
+                  fix: 'profile 沒有真的生效。確認三件事：① 指令/IDE 設定裡的 profile 名稱拼字是 mysql（不是 Mysql 或 MYSQL，Spring 對 profile 名稱大小寫敏感）；② 如果是用 IDE 綠色箭頭跑，Active profiles 欄位要填，不能只改 Program arguments 卻忘了填 Active profiles（兩個欄位效果一樣，填其中一個即可，但常見錯誤是兩邊都沒填）；③ 啟動 log 往前捲，Spring Boot 啟動時第一行附近會印 "The following 1 profile is active: \\"mysql\\""，這行沒出現就代表 profile 根本沒套用。',
+                },
+                {
+                  issue: 'com.mysql.cj.jdbc.exceptions.CommunicationsException: Communications link failure',
+                  fix: '代表程式有連去 MySQL，但連不上。依序排查：① docker ps 確認 react-learning-mysql 還活著、STATUS 是 Up；② 回到 Stage 1 用 Test-NetConnection -ComputerName 127.0.0.1 -Port 3306 確認 port 真的通；③ 檢查 application-mysql.properties 的 url 裡主機名是不是誤寫成服務名稱 mysql（這個寫法只有在 Spring Boot 本身也是容器、跟 MySQL 容器在同一個 docker network 時才有效；本機直接用 mvn/IDE 跑 Spring Boot，主機名必須是 localhost 或 127.0.0.1）。',
+                },
+                {
+                  issue: 'java.sql.SQLException: Access denied for user \'learner\'@\'...\' (using password: YES)',
+                  fix: 'Spring Boot 這邊的帳密跟 MySQL 容器裡實際的帳密對不上。先用 Stage 1 教的 docker exec 方式確認帳密本身沒問題，再回來對照 application-mysql.properties 裡 username/password 是不是跟 docker-compose.yml 一致（兩邊任何一邊改過帳密但沒同步更新，就會發生這個錯）。',
+                },
+                {
+                  issue: 'Unknown database \'learning_lab\'',
+                  fix: '代表連上 MySQL 伺服器了，但找不到指定的資料庫，通常是因為容器沿用了「舊的」volume、而舊 volume 建立時資料庫名稱不同，或是 docker-compose.yml 的 MYSQL_DATABASE 後來才改過。解法同樣是 docker compose --profile mysql down -v 清掉 volume 重新啟動一次（全新環境一定會依照目前的 docker-compose.yml 建好 learning_lab）。',
+                },
+                {
+                  issue: 'Public Key Retrieval is not allowed',
+                  fix: 'MySQL 8 預設的 caching_sha2_password 認證方式，在某些驅動版本 + 沒有啟用 SSL 的組合下需要額外允許取得公鑰。如果遇到這個錯誤，在 application-mysql.properties 的 url 後面加上 &allowPublicKeyRetrieval=true（例如 ...useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=...）。',
+                },
+              ],
+            },
+            {
+              id: 'extdb-mysql-verify-connection',
+              title: '驗證「連線成功」：四種互相印證的方法',
+              instruction: `啟動後不要只看「沒有紅字」就覺得成功，請依序做完下面四件事，任何一件做不到都代表還沒真正連上：
+
+① 看啟動 log 裡的關鍵字：往上捲一定會看到 HikariPool-1 - Starting... 接著 HikariPool-1 - Start completed.（Hikari 是 Spring Boot 預設的連線池，這行代表「真的」跟資料庫建立起連線了，不是只是設定檔寫對而已）。再往下找 Hibernate 印出的 SQL（因為 spring.jpa.show-sql=true），啟動時應該會看到類似 create table tasks (...) 或 alter table 的語句——這就是 ddl-auto=update 自動幫你在 MySQL 建表的證據。
+
+② 進容器直接下 SQL 看表：確認 Spring Boot 啟動「之後」，MySQL 裡真的多出一張 tasks 表。
+
+③ 呼叫一次真正的 API，新增一筆資料，再回頭用 SQL 查，確認資料真的寫進 MySQL（而不是你以為切換了，其實還在用 H2）。
+
+④（最推薦、最直覺）打開 IntelliJ 右側的 Database 工具視窗，用 + 新增一個 MySQL 資料來源（Host: localhost，Port: 3306，Database: learning_lab，User: learner，Password: learn123），測試連線（Test Connection）成功後，展開 tasks 表用表格形式直接看資料——這是最接近「GUI 工具檢視資料庫」的日常開發習慣，練完這個練習以後接其他資料庫也是同一套流程。`,
+              checkpoint: '四件事都做過一輪：log 看到 HikariPool Start completed、docker exec 下 SHOW TABLES 看到 tasks、呼叫 POST /api/tasks 新增後能在 MySQL 裡查到同一筆資料、IntelliJ Database 工具視窗「Test Connection」顯示成功。做到這裡才算是真的、徹底驗證了「程式已經連上 MySQL」，而不是「設定檔看起來對」。',
+              hint: `# ① 啟動 log 往前找這兩行（代表連線池真的建立起連線）：
+#   HikariPool-1 - Starting...
+#   HikariPool-1 - Start completed.
+
+# ② 進容器直接看資料表結構
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW TABLES; DESCRIBE tasks;"
+
+# ③ 呼叫 API 新增一筆資料，再用 SQL 確認資料真的進了 MySQL
+curl -X POST http://localhost:8080/api/tasks -H "Content-Type: application/json" -d "{\\"title\\":\\"驗證MySQL連線\\"}"
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM tasks;"
+
+# ④ IntelliJ：右側 Database 工具視窗 → + → Data Source → MySQL
+#    Host: localhost  Port: 3306  Database: learning_lab
+#    User: learner     Password: learn123
+#    按 Test Connection，出現綠色勾勾才算成功（第一次可能會跳出缺 driver 的提示，
+#    照提示按 Download Driver Files 讓 IntelliJ 自動抓 MySQL 的 JDBC driver 即可，
+#    這跟 pom.xml 裡的驅動是兩回事：IntelliJ 的 Database 工具是獨立於你的 Spring Boot 專案運作的）`,
+              troubleshooting: [
+                {
+                  issue: 'log 裡看不到 HikariPool 的字樣，直接跳到別的訊息',
+                  fix: '代表連線池根本沒建立起來，應用程式大概率啟動失敗了（往下找真正的 Exception 堆疊，通常第一個 Caused by: 才是真正原因，不要只看最上面那行籠統的錯誤）。',
+                },
+                {
+                  issue: '呼叫 API 回 200，但 MySQL 裡查不到資料',
+                  fix: '代表 Spring Boot 其實還是連著 H2（或連到別的 MySQL 實例）。回頭檢查 profile 有沒有真的套用（參考上一步 troubleshooting），或是不是不小心開了兩個 Spring Boot 進程（一個沒加 profile 的舊的還開著，占用了 8080 port，新的其實啟動失敗但你沒注意到）。',
+                },
+                {
+                  issue: 'IntelliJ Database 工具視窗 Test Connection 失敗，但 docker exec 進去可以查資料',
+                  fix: '代表「MySQL 本身沒問題」，問題出在 IntelliJ 這邊：常見是還沒下載對應的 JDBC driver 檔案（跳出提示時要點 Download），或是帳密／Database 名稱打錯。這個工具視窗的連線設定跟 Spring Boot 的 application-mysql.properties 是完全獨立的兩組設定，彼此不會互相影響。',
+                },
+              ],
             },
           ],
         },
