@@ -8,6 +8,7 @@ import InterviewProjectsSection from './components/InterviewProjectsSection'
 import DockerSection from './components/DockerSection'
 import ExternalDbSection from './components/ExternalDbSection'
 import TestingSection from './components/TestingSection'
+import FinalCapstoneSection from './components/FinalCapstoneSection'
 import HooksToolboxSection from './components/HooksToolboxSection'
 import JavaBasicsSection from './components/JavaBasicsSection'
 import RenderFlowSection from './components/RenderFlowSection'
@@ -61,6 +62,7 @@ const SECTION_LABELS = {
   docker: '15. Docker 容器化實戰',
   externalDb: '16. 串接外部資料庫',
   testing: '17. 自動化測試',
+  finalCapstone: '18. 綜合實戰總複習',
 }
 
 function readSavedLearningProgress() {
@@ -374,6 +376,7 @@ function App() {
   const [externalDbChecks, setExternalDbChecks] = useState(() => savedLearningProgress.externalDbChecks ?? {})
   const [selectedExternalDbStackId, setSelectedExternalDbStackId] = useState('extdb-mysql')
   const [testingChecks, setTestingChecks] = useState(() => savedLearningProgress.testingChecks ?? {})
+  const [finalCapstoneChecks, setFinalCapstoneChecks] = useState(() => savedLearningProgress.finalCapstoneChecks ?? {})
   const [scenarioSelections, setScenarioSelections] = useState({})
   const [scenarioFeedback, setScenarioFeedback] = useState({})
   const [brokenCodeSelections, setBrokenCodeSelections] = useState({})
@@ -504,6 +507,7 @@ function App() {
       dockerChecks,
       externalDbChecks,
       testingChecks,
+      finalCapstoneChecks,
       javaQuizResults,
       javaReadingResults,
       quizCorrectMap,
@@ -526,6 +530,7 @@ function App() {
     dockerChecks,
     externalDbChecks,
     testingChecks,
+    finalCapstoneChecks,
     javaQuizResults,
     javaReadingResults,
     brokenCodeFeedback,
@@ -1967,6 +1972,10 @@ function App() {
 
   const handleToggleTestingStep = (stepId) => {
     setTestingChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
+  }
+
+  const handleToggleFinalCapstoneStep = (stepId) => {
+    setFinalCapstoneChecks((current) => ({ ...current, [stepId]: !current[stepId] }))
   }
 
   // ------------------------------------------------------------------
@@ -3523,6 +3532,12 @@ function App() {
         onToggleTestingStep={handleToggleTestingStep}
       />
 
+      <FinalCapstoneSection
+        registerSectionRef={registerSectionRef}
+        finalCapstoneChecks={finalCapstoneChecks}
+        onToggleFinalCapstoneStep={handleToggleFinalCapstoneStep}
+      />
+
       <nav className="floating-nav" aria-label="快速導覽">
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'hero', logMessage: '已回到頁首總覽。' })}>
           回到頂部
@@ -3541,6 +3556,9 @@ function App() {
         </button>
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'testing' })}>
           自動化測試
+        </button>
+        <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'finalCapstone' })}>
+          綜合複習
         </button>
         <button type="button" className="ghost-button jump-button" onClick={() => handleNavigateToTarget({ sectionKey: 'practice' })}>
           課程區

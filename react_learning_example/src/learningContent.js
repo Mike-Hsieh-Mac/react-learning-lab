@@ -3799,7 +3799,9 @@ export default function MyExpenseTracker() {
     apiContract: [
       'POST /api/auth/register -> 201，註冊（username 不可重複，密碼會被雜湊後存）；重複 username 回 400',
       'POST /api/auth/login    -> 200，登入成功回傳 { token }；帳密錯誤回 401',
-      'GET  /apconceptExplanation: [
+      'GET  /api/auth/me       -> 200，帶有效 token 查詢目前登入者資訊；沒帶或 token 無效回 401',
+    ],
+    conceptExplanation: [
       '先用生活比喻理解，再看程式碼會輕鬆很多：JWT token 就像一張「有防偽簽章的識別證」。你去警衛室（login）證明身分後，警衛（後端）發給你一張識別證（token），上面寫著你的名字，還蓋了一個只有警衛室才做得出來的防偽章（簽章）。之後你想進任何房間（受保護的 API），只要出示這張識別證，警衛掃一下防偽章確認沒被偽造、也還沒過期，就放行——警衛完全不需要記得「誰進來過」，這就是「無狀態（stateless）」的意思。',
       '整個練習其實只有 3 個角色在合作：AuthController/AuthService（負責「核發識別證」：註冊、登入）、JwtUtil（負責「做出防偽章」與「驗證防偽章」：產生/解析 token）、JwtAuthFilter + SecurityConfig（負責「站在每個房間門口的警衛」：每個請求進來前先檢查有沒有帶識別證，帶了就放行）。新手常卡住的地方，就是分不清楚這三者各自的職責邊界，下面用流程圖把「誰在什麼時間點做什麼事」畫出來。',
       '特別提醒 Stage 3 的兩個常見地雷：① JwtAuthFilter 沒有加 @Component，Spring 就不會把它當成 Bean，SecurityConfig 會直接啟動失敗（報錯 required a bean of type JwtAuthFilter that could not be found）。② 沒有自訂 AuthenticationEntryPoint 的話，「沒帶 token / token 失效」預設會回 403，而不是 apiContract 要求的 401——因為 Spring Security 在沒有 httpBasic()/formLogin() 的情況下，找不到「該怎麼引導使用者登入」，只好用最保守的 403 打發，所以要自己指定一個 entry point 直接回 401。',
@@ -4861,7 +4863,7 @@ public class CommentController {
             id: 'cm-use-mysql',
             title: '用 MySQL 設定檔重新啟動後端',
             instruction: '參考 16. 串接外部資料庫 的 MySQL 練習：docker compose --profile mysql up -d 啟動 MySQL 容器，pom.xml 打開 mysql-connector-j 註解，再用 --spring.profiles.active=mysql 啟動後端。重新打開前端頁面測試留言功能，行為應該跟剛剛用 H2 時一模一樣。',
-            checkpoint: '用 docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM comments;" 能看到透過 API 新增的留言，證明資料真的進了 MySQL，而不是 H2。',
+            checkpoint: '用 docker exec -it react-learning-mysql mysql -ulearner -plearn123 learning_lab -e "SELECT * FROM comments;" 能看到透過 API 新增的留言，證明資料真的進了 MySQL，而不是 H2。',
             hint: `# 1. 啟動 MySQL 容器
 docker compose --profile mysql up -d
 
@@ -4871,7 +4873,7 @@ docker compose --profile mysql up -d
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 
 # 4. 驗證資料真的進了 MySQL
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM comments;"`,
+docker exec -it react-learning-mysql mysql -ulearner -plearn123 learning_lab -e "SELECT * FROM comments;"`,
           },
         ],
       },
@@ -5720,10 +5722,10 @@ docker compose --profile mysql up -d`,
               instruction: '在啟動 Spring Boot 之前，先獨立驗證「MySQL 本身」是通的，排除掉「到底是 MySQL 沒設定好，還是 Spring Boot 設定錯」這種混淆。用 docker exec 直接進容器下 mysql client，用 docker-compose.yml 裡設定的帳密（learner / learn123）登入，確認 learning_lab 這個資料庫存在。',
               checkpoint: 'docker exec 指令成功登入（沒有 Access denied），下 SHOW DATABASES; 看得到 learning_lab，下 SELECT CURRENT_USER(); 顯示 learner@%，代表帳號密碼都正確、資料庫也建好了——這一步做完，之後如果 Spring Boot 連不上，問題就一定出在設定檔或網路，不會是 MySQL 本身的問題。',
               hint: `# 進容器內部的 mysql client（帳密來自 docker-compose.yml 的 MYSQL_USER/MYSQL_PASSWORD）
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW DATABASES; SELECT CURRENT_USER();"
+docker exec -it react-learning-mysql mysql -ulearner -plearn123 learning_lab -e "SHOW DATABASES; SELECT CURRENT_USER();"
 
 # 如果想用「主機上」自己裝的 mysql client 連（而不是進容器），驗證 port 映射有沒有通：
-mysql -h 127.0.0.1 -P 3306 -ularner -plearn123 learning_lab -e "SELECT 1;"
+mysql -h 127.0.0.1 -P 3306 -ulearner -plearn123 learning_lab -e "SELECT 1;"
 
 # 沒裝 mysql client 的話，用 PowerShell 測 port 有沒有通也可以（先驗證網路層）：
 Test-NetConnection -ComputerName 127.0.0.1 -Port 3306`,
@@ -5758,15 +5760,22 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 3306`,
 </dependency>
 
 # 命令列也可以直接確認依賴有沒有真的進到 classpath：
-mvn dependency:tree | Select-String mysql`,
+# 如果這台機器沒有另外裝 Maven（沒有 mvn 指令），改用專案自帶的 Maven Wrapper 即可，
+# 它會在第一次執行時自動下載正確版本的 Maven，不用額外安裝：
+.\\mvnw.cmd dependency:tree | Select-String mysql   # Windows
+# ./mvnw dependency:tree | grep mysql                # Linux / macOS`,
               troubleshooting: [
                 {
                   issue: '啟動時噴錯 Cannot load driver class: com.mysql.cj.jdbc.Driver',
-                  fix: '90% 是忘了拿掉 pom.xml 裡的註解，或是拿掉了但 IDE/Maven 沒有 reload，還在用舊的 classpath 跑。先用 mvn dependency:tree | Select-String mysql 確認依賴真的存在；如果存在但 IDE 跑出來的還是報錯，試試「Reload Maven Project」或直接關掉重開 IDE 的 Run 設定再跑一次。',
+                  fix: '90% 是忘了拿掉 pom.xml 裡的註解，或是拿掉了但 IDE/Maven 沒有 reload，還在用舊的 classpath 跑。先用 .\\mvnw.cmd dependency:tree | Select-String mysql 確認依賴真的存在；如果存在但 IDE 跑出來的還是報錯，試試「Reload Maven Project」或直接關掉重開 IDE 的 Run 設定再跑一次。',
                 },
                 {
                   issue: 'pom.xml 改完存檔，IDE 左下角或編輯器沒有跳出「匯入變更」的提示',
                   fix: 'IntelliJ 預設有些版本不會自動偵測，養成改完 pom.xml 就手動點一次 Maven 工具視窗的「重新整理」圖示（兩個箭頭循環的那個）的習慣，比較保險。',
+                },
+                {
+                  issue: '這台機器打 mvn ... 出現「mvn 不是內部或外部命令」',
+                  fix: '代表這台機器沒有安裝 Maven、或是裝了但沒加進系統 PATH。不用另外安裝 Maven——這個專案根目錄本來就帶著 mvnw.cmd（Windows）/ mvnw（Linux/macOS）這個「Maven Wrapper」，把所有指令開頭的 mvn 換成 .\\mvnw.cmd（第一次執行會自動下載對應版本的 Maven，之後都會用同一份，不會每台機器版本不一樣）。',
                 },
               ],
             },
@@ -5780,13 +5789,23 @@ mvn dependency:tree | Select-String mysql`,
             {
               id: 'extdb-mysql-profile',
               title: '用 mysql profile 啟動後端',
-              instruction: '打開 src/main/resources/application-mysql.properties 看連線字串怎麼寫（url/driver-class-name/username/password 都跟 H2 版的對應，只是值換掉）。接著用 mvn spring-boot:run -Dspring-boot.run.profiles=mysql 啟動。如果你是在 IntelliJ 裡用綠色三角形 Run，要另外去 Run/Debug Configurations 把 Active profiles 欄位填 mysql（或在 Program arguments 加 --spring.profiles.active=mysql）——直接按 IDE 的 Run 鍵「不會」自動套用 Maven 指令列的 -D 參數，這是新手最常忽略的一步，結果變成還是連著 H2 卻一直疑惑「設定明明是對的為什麼沒連到 MySQL」。',
+              instruction:
+                '打開 src/main/resources/application-mysql.properties 看連線字串怎麼寫（url/driver-class-name/username/password 都跟 H2 版的對應，只是值換掉）。接著在專案根目錄執行 .\\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=mysql"（這是實測可行、建議直接複製貼上的完整指令；引號把整個 -D 參數包起來，避免 PowerShell 把它拆成兩截）。\n\n' +
+                '⚠️ 重點澄清：這個練習「不需要」也「不應該」另外執行 docker compose up -d 去啟動 react-learning（app）這個容器。app 容器裡包著的，其實就是你現在要用 Spring Boot 直接跑在本機的同一套程式——兩者是「二選一」的關係：要嘛讓 Spring Boot 整包被打進 app 容器裡用 Docker 跑，要嘛像現在這樣直接在本機（或用 mvnw）跑 Spring Boot、只讓 MySQL 單獨用 Docker 跑。這次練習要做的，是用 Docker 跑「資料庫」，Spring Boot 本身維持用 mvnw 在本機直接執行，這樣你才能用 localhost:3306 連到 MySQL（如果 Spring Boot 也包進 app 容器一起用 compose 啟動，連線字串才需要改成服務名稱 mysql:3306，那是另一種進階玩法，這個 Stage 不需要）。\n\n' +
+                '如果你是在 IntelliJ 裡用綠色三角形 Run，要另外去 Run/Debug Configurations 把 Active profiles 欄位填 mysql（或在 Program arguments 加 --spring.profiles.active=mysql）——直接按 IDE 的 Run 鍵「不會」自動套用 Maven 指令列的 -D 參數，這是新手最常忽略的一步，結果變成還是連著 H2 卻一直疑惑「設定明明是對的為什麼沒連到 MySQL」。',
               checkpoint: '啟動 log 從頭到尾捲過一遍，確定沒有紅色的 Exception／Caused by；同時要親眼看到下面「驗證連線成功」那一步列出的證據，而不是「沒報錯就當作成功」。',
-              hint: `# 方式一：Maven 指令啟動並指定 profile
-mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+              hint: `# 只需要啟動 MySQL 容器（不用啟動 app / react-learning 容器）：
+docker compose --profile mysql up -d
 
-# 方式二：打包後用 jar 啟動
-mvn clean package -DskipTests
+# 方式一：用專案自帶的 Maven Wrapper 啟動並指定 profile（實測可行，建議整行複製貼上）
+.\\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=mysql"     # Windows
+# ./mvnw spring-boot:run -Dspring-boot.run.profiles=mysql           # Linux / macOS
+
+# 方式二：如果這台機器本來就有裝 Maven 且已加進 PATH，也可以用 mvn（效果相同）
+mvn spring-boot:run "-Dspring-boot.run.profiles=mysql"
+
+# 方式三：打包後用 jar 啟動
+.\\mvnw.cmd clean package -DskipTests
 java -jar target/*.jar --spring.profiles.active=mysql
 
 # IntelliJ Run 設定（Run/Debug Configurations）：
@@ -5798,8 +5817,20 @@ java -jar target/*.jar --spring.profiles.active=mysql
                   fix: 'profile 沒有真的生效。確認三件事：① 指令/IDE 設定裡的 profile 名稱拼字是 mysql（不是 Mysql 或 MYSQL，Spring 對 profile 名稱大小寫敏感）；② 如果是用 IDE 綠色箭頭跑，Active profiles 欄位要填，不能只改 Program arguments 卻忘了填 Active profiles（兩個欄位效果一樣，填其中一個即可，但常見錯誤是兩邊都沒填）；③ 啟動 log 往前捲，Spring Boot 啟動時第一行附近會印 "The following 1 profile is active: \\"mysql\\""，這行沒出現就代表 profile 根本沒套用。',
                 },
                 {
+                  issue: 'unknown lifecycle phase ".run.profiless=mysql"（或類似拆開、拼錯的錯誤訊息）',
+                  fix: '這是 PowerShell 參數解析踩坑，不是程式邏輯錯誤。兩個最常見原因：① -Dspring-boot.run.profiles=mysql 這段字串中間被意外打進一個空格，導致 Maven 把它拆成兩截參數；② 打字打成 profiless（多一個 s）之類的拼字錯誤。解法：直接複製貼上本頁給的完整指令 .\\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=mysql"，整個 -D 參數要用雙引號包起來，不要自己重新手打一次，最保險。',
+                },
+                {
+                  issue: '\'mvn\' 不是內部或外部命令，也不是可執行的程式',
+                  fix: '這台機器沒有安裝 Maven，或裝了但沒加進 PATH。不用額外安裝，改用專案自帶的 Maven Wrapper：把指令開頭的 mvn 換成 .\\mvnw.cmd（Windows）即可，第一次執行會自動下載對應版本的 Maven。',
+                },
+                {
+                  issue: 'The JAVA_HOME environment variable is not defined correctly',
+                  fix: '代表這台機器沒裝 JDK，或裝了但 JAVA_HOME 沒設定／設定錯誤（例如指到 JRE 而不是 JDK，或路徑打錯）。步驟：① java -version 確認有裝 JDK 17；② 找到 JDK 安裝路徑（內含 bin\\java.exe 的那個資料夾，例如 C:\\Program Files\\Eclipse Adoptium\\jdk-17.x.x-hotspot）；③ 在「系統環境變數」裡新增 JAVA_HOME 指向這個路徑，並把 %JAVA_HOME%\\bin 加進 Path；④ 一定要開一個全新的終端機視窗，設定才會生效，原本開著的視窗不會自動套用。',
+                },
+                {
                   issue: 'com.mysql.cj.jdbc.exceptions.CommunicationsException: Communications link failure',
-                  fix: '代表程式有連去 MySQL，但連不上。依序排查：① docker ps 確認 react-learning-mysql 還活著、STATUS 是 Up；② 回到 Stage 1 用 Test-NetConnection -ComputerName 127.0.0.1 -Port 3306 確認 port 真的通；③ 檢查 application-mysql.properties 的 url 裡主機名是不是誤寫成服務名稱 mysql（這個寫法只有在 Spring Boot 本身也是容器、跟 MySQL 容器在同一個 docker network 時才有效；本機直接用 mvn/IDE 跑 Spring Boot，主機名必須是 localhost 或 127.0.0.1）。',
+                  fix: '代表程式有連去 MySQL，但連不上。依序排查：① docker ps 確認 react-learning-mysql 還活著、STATUS 是 Up；② 回到 Stage 1 用 Test-NetConnection -ComputerName 127.0.0.1 -Port 3306 確認 port 真的通；③ 檢查 application-mysql.properties 的 url 裡主機名是不是誤寫成服務名稱 mysql（這個寫法只有在 Spring Boot 本身也是容器、跟 MySQL 容器在同一個 docker network 時才有效；這個 Stage 用 mvnw 在本機直接跑 Spring Boot，主機名必須是 localhost 或 127.0.0.1，不要用服務名稱）。',
                 },
                 {
                   issue: 'java.sql.SQLException: Access denied for user \'learner\'@\'...\' (using password: YES)',
@@ -5811,7 +5842,7 @@ java -jar target/*.jar --spring.profiles.active=mysql
                 },
                 {
                   issue: 'Public Key Retrieval is not allowed',
-                  fix: 'MySQL 8 預設的 caching_sha2_password 認證方式，在某些驅動版本 + 沒有啟用 SSL 的組合下需要額外允許取得公鑰。如果遇到這個錯誤，在 application-mysql.properties 的 url 後面加上 &allowPublicKeyRetrieval=true（例如 ...useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=...）。',
+                  fix: 'MySQL 8 預設的 caching_sha2_password 認證方式，在「沒有啟用 SSL（useSSL=false）」的情況下，驅動預設不敢自己跟伺服器要公鑰（怕被竊聽），直接擋下來。application-mysql.properties 這份教材「已經預設」把 url 寫成 ...useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=...，正常照抄這份設定不會遇到這個錯誤。如果你還是遇到，最常見原因是：① 這台機器上的檔案是舊版、還沒同步到最新的 application-mysql.properties（用 git pull 或重新複製專案檔案）；② 自己手動改過連線字串但漏加了 allowPublicKeyRetrieval=true。確認 url 完整長這樣：jdbc:mysql://localhost:3306/learning_lab?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Taipei&characterEncoding=utf8（這只是方便本機練習的做法，正式環境應該改用真正的 SSL 連線，而不是永遠靠這個參數繞過安全機制）。',
                 },
               ],
             },
@@ -5833,11 +5864,11 @@ java -jar target/*.jar --spring.profiles.active=mysql
 #   HikariPool-1 - Start completed.
 
 # ② 進容器直接看資料表結構
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SHOW TABLES; DESCRIBE tasks;"
+docker exec -it react-learning-mysql mysql -ulearner -plearn123 learning_lab -e "SHOW TABLES; DESCRIBE tasks;"
 
 # ③ 呼叫 API 新增一筆資料，再用 SQL 確認資料真的進了 MySQL
 curl -X POST http://localhost:8080/api/tasks -H "Content-Type: application/json" -d "{\\"title\\":\\"驗證MySQL連線\\"}"
-docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM tasks;"
+docker exec -it react-learning-mysql mysql -ulearner -plearn123 learning_lab -e "SELECT * FROM tasks;"
 
 # ④ IntelliJ：右側 Database 工具視窗 → + → Data Source → MySQL
 #    Host: localhost  Port: 3306  Database: learning_lab
@@ -6372,6 +6403,232 @@ static void overrideDatasourceProperties(DynamicPropertyRegistry registry) {
       question: 'Testcontainers 整合測試需要本機有 Docker，這跟你「這台機器不能跑 Docker」的限制要怎麼共存？',
       answerHint:
         '用 Maven 的 -Dtest 排除語法（mvn test -Dtest=\'!CommentTestcontainersIntegrationTest\'）在沒有 Docker 的機器上跳過這份測試，其餘不需要 Docker 的測試（單元測試、@WebMvcTest、@DataJpaTest）正常執行；真正需要驗證「跟真實 MySQL 行為一致」時，再把程式碼推上 GitHub，到有 Docker 的那台機器上 git pull 後完整跑一次 mvn test。這正好也是 CI/CD 流程的雛形：不同測試可以依賴不同的執行環境。',
+    },
+  ],
+}
+
+// ============================================================================
+// 18. 綜合實戰總複習：JSX + Spring Boot + Docker + 單元測試
+// 不重新教新語法，而是把 13~17 章節已經分開練過的四個面向，
+// 用同一個「已經存在」的功能（ShortLink 短網址服務）串成一條完整的主線，
+// 模擬面試現場最常見的題型：「請帶我導覽一次你這個專案的架構」。
+// ============================================================================
+export const finalCapstoneGuide = {
+  title: '綜合實戰總複習：用短網址服務串起 JSX / Spring Boot / Docker / 單元測試',
+  subtitle: '面試官通常不會分開問「你 React 寫得好嗎」「你後端寫得好嗎」，而是指著一個功能問「這支從前端到資料庫整條路，講給我聽」——這個章節就是在練這件事。',
+  goal: '不寫新功能，而是回頭用「架構師視角」重新檢視 MyShortLinks.jsx + ShortLinkController/Service/Repository + docker-compose.yml + ShortLinkServiceTest 這四份已經存在的程式碼，確保你能在面試現場流暢地從任一層講到任一層，並能現場回答追問。',
+  whyThis: [
+    '面試最怕的不是「不會寫」，而是「寫得出來但講不出為什麼這樣設計」——這一章刻意不教新東西，逼你把舊知識講清楚。',
+    '很多人 JSX、Spring Boot、Docker、測試是分開學的，腦中是四個獨立的知識點；這一章的目的是把它們「焊」在同一條故事線上：使用者點擊 → React 事件 → fetch → Controller → Service 商業邏輯 → Repository → 資料庫 → Docker 容器 → 單元測試保護這條邏輯。',
+    '刻意選短網址服務當教材，因為它四層都「剛好」有東西可以講：JSX 有 list rendering／conditional rendering／controlled input；Spring Boot 有驗證／分層／REST 設計；Docker 有 profiles／volume／網路；測試有「碰撞重試」這種真正值得單獨測的邏輯。',
+  ],
+  stages: [
+    {
+      id: 'final-stage-jsx',
+      phase: 'jsx',
+      title: 'Stage 1：重新解讀 MyShortLinks.jsx 的 JSX 設計',
+      intro: '打開 src/components/MyShortLinks.jsx，這次不是照抄，而是練習「指著程式碼講設計理由」。面試官常常直接把你自己的程式碼叫出來問「這行為什麼這樣寫」。',
+      steps: [
+        {
+          id: 'final-jsx-list-rendering',
+          title: '找出 list rendering，解釋 key 的作用',
+          instruction: '找到用 .map() 畫出短網址列表的那一段。準備好回答：為什麼每個項目要給 key？如果 key 用 index（陣列索引）而不是 code（短網址代碼），刪除中間一筆資料時畫面會發生什麼事？',
+          checkpoint: '你能現場畫出「用 index 當 key，刪除中間一筆」會讓 React 錯誤地複用 DOM 節點、導致畫面對應錯亂的示意圖或口頭說明。',
+          hint: `// 錯誤示範（面試常考的地雷）：
+{links.map((link, index) => <LinkRow key={index} link={link} />)}
+// 刪除第 2 筆後，React 會把「第 3 筆的資料」套用到「第 2 個 DOM 節點」上，
+// 因為 index 本身沒有跟著資料走，React 誤以為只是內容變了，而不是少了一筆。
+
+// 正確示範：
+{links.map((link) => <LinkRow key={link.code} link={link} />)}
+// code 是後端給的唯一值，跟著資料本身走，刪除/排序都不會認錯節點。`,
+        },
+        {
+          id: 'final-jsx-conditional',
+          title: '找出 conditional rendering，解釋「載入中／空清單／有資料」三態',
+          instruction: '一個寫得完整的列表元件，通常要處理三種畫面狀態：資料還沒回來（loading）、資料回來但是空陣列（empty state）、資料回來且有內容（正常渲染）。在 MyShortLinks.jsx 裡找這三種分支，如果目前沒有處理空清單，想一下要怎麼加。',
+          checkpoint: '你能講出為什麼「沒處理 loading 狀態」在面試作品集裡常被扣分：使用者會看到一閃而過的空白或錯誤的空清單提示，體驗很差。',
+          hint: `{loading ? (
+  <p>載入中...</p>
+) : links.length === 0 ? (
+  <p>目前還沒有任何短網址，建立第一筆看看吧！</p>
+) : (
+  <ul>{links.map((link) => <LinkRow key={link.code} link={link} />)}</ul>
+)}`,
+        },
+        {
+          id: 'final-jsx-controlled-form',
+          title: '找出 controlled input，解釋「受控元件」跟「不受控」的差異',
+          instruction: '找到建立短網址的表單輸入框，確認它是不是「值完全由 state 控制」（value={xxx} + onChange={...}）。練習口頭說明：如果拿掉 value 這個 prop 只留 onChange，會發生什麼事（變成不受控元件，React 不再掌控畫面上顯示的文字）。',
+          checkpoint: '你能解釋「受控元件」的核心概念：畫面上看到的文字，永遠是 state 的「反映」，不是使用者打字直接造成的——使用者打字觸發 onChange，onChange 呼叫 setState，state 改變才讓 React 重新渲染出新的文字。',
+          hint: `const [targetUrl, setTargetUrl] = useState('')
+
+<input
+  value={targetUrl}                                  // 畫面顯示的值 = state
+  onChange={(event) => setTargetUrl(event.target.value)} // 使用者打字 → 更新 state
+/>
+// 這一來一回，就是「受控元件」的完整迴路。`,
+        },
+      ],
+    },
+    {
+      id: 'final-stage-springboot',
+      phase: 'springboot',
+      title: 'Stage 2：重新解讀 ShortLinkController / Service / Repository 的分層設計',
+      intro: '打開 ShortLinkController.java、ShortLinkService.java、ShortLinkRepository.java、ShortLinkRequest.java，練習講清楚「請求進來後，依序經過誰、每一層負責什麼」。',
+      steps: [
+        {
+          id: 'final-spring-layers',
+          title: '畫出一次 POST /api/links 的完整分層路徑',
+          instruction: '口頭或畫圖描述：瀏覽器 → Controller（接收 HTTP、做 @Valid 驗證）→ Service（真正的商業邏輯：產生唯一代碼、重試機制）→ Repository（存進資料庫）→ 回傳 201 + 短網址物件。練習時specifically 指出「Controller 完全不知道資料存在哪種資料庫」這件事。',
+          checkpoint: '你能講出「分層」帶來的具體好處：Controller 換一種驗證規則不用動 Service；Service 換一種資料庫（H2→MySQL）不用動 Controller；Repository 介面不變，底層實作可以隨便換。',
+          hint: `瀏覽器
+  │ POST /api/links { targetUrl }
+  ▼
+ShortLinkController          ← 只管 HTTP：收請求、@Valid 擋格式錯、回正確的狀態碼
+  │ shortLinkService.create(request)
+  ▼
+ShortLinkService              ← 商業邏輯：產生唯一代碼、碰撞就重試、組裝 Entity
+  │ shortLinkRepository.save(entity)
+  ▼
+ShortLinkRepository (JPA)     ← 完全不知道底層是 H2 還是 MySQL
+  │
+  ▼
+資料庫`,
+        },
+        {
+          id: 'final-spring-validation',
+          title: '解釋 ShortLinkRequest 的驗證規則怎麼跟 Controller 搭配',
+          instruction: '打開 ShortLinkRequest.java（應該是個 record），找到上面的驗證 annotation（例如 @NotBlank、@Pattern）。解釋：這些 annotation 什麼時候會被觸發檢查？如果驗證失敗，是誰負責把它轉成 400 回應（通常是 GlobalExceptionHandler 攔截 MethodArgumentNotValidException）。',
+          checkpoint: '你能講出完整鏈路：Controller 方法參數上的 @Valid → Spring 自動呼叫驗證 → 驗證失敗丟出 MethodArgumentNotValidException → GlobalExceptionHandler 攔截，轉成統一格式的 400 錯誤回應（fieldErrors 陣列），Controller 本身完全不用寫任何 if 去檢查格式。',
+          hint: `public record ShortLinkRequest(
+    @NotBlank @Pattern(regexp = "https?://.+") String targetUrl
+) {}
+
+@PostMapping
+public ResponseEntity<ShortLink> create(@Valid @RequestBody ShortLinkRequest request) {
+    // 執行到這一行，代表 targetUrl 一定不是空字串、且一定是 http/https 開頭的網址，
+    // 驗證失敗的情況已經在到這裡之前，就被攔截轉成 400 了。
+    ...
+}`,
+        },
+      ],
+    },
+    {
+      id: 'final-stage-docker',
+      phase: 'docker',
+      title: 'Stage 3：把短網址服務完整 Docker 化跑一次',
+      intro: '結合 15. Docker 容器化實戰 跟 16. 串接外部資料庫 的知識，這次目標是：用 docker compose，讓短網址服務真的連到 MySQL 容器跑起來，並能講出完整的容器網路拓樸。',
+      steps: [
+        {
+          id: 'final-docker-full-stack',
+          title: '同時啟動 app（或本機 mvnw）+ mysql，完整走一次短網址 CRUD',
+          instruction: '用 docker compose --profile mysql up -d 啟動 MySQL；打開 pom.xml 的 mysql-connector-j 驅動；用 .\\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=mysql" 啟動後端；打開瀏覽器用 MyShortLinks 畫面建立一筆短網址，再用 docker exec 進 MySQL 容器直接下 SQL 確認資料真的寫進去了。',
+          checkpoint: '能完整講出資料流動路徑：瀏覽器 JSX 事件 → fetch POST → Controller → Service → Repository → Hibernate 產生 INSERT SQL → MySQL 容器裡的 learning_lab 資料庫 → 你用 docker exec 查到這筆資料。',
+          hint: `docker compose --profile mysql up -d
+.\\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=mysql"
+
+# 瀏覽器操作完後，直接進容器驗證：
+docker exec -it react-learning-mysql mysql -ularner -plearn123 learning_lab -e "SELECT * FROM short_link;"`,
+        },
+        {
+          id: 'final-docker-architecture-question',
+          title: '練習回答：「如果要把這個服務真的上線，Docker 部分你會怎麼調整？」',
+          instruction: '這是面試常見的延伸問題，練習組織一個有層次的答案，至少包含：① ddl-auto 應該從 update 改成 validate + Flyway/Liquibase 做版本控管的 migration；② 資料庫密碼不應該明寫在 docker-compose.yml，應該用 Docker Secrets 或環境變數注入；③ 應該要有健康檢查（healthcheck）讓編排工具知道容器真的準備好了，不是「process 有在跑」就算；④ volume 的備份機制要另外規劃，不能只靠 docker volume 本身。',
+          checkpoint: '你能不看提示，自己講出至少 3 點「學習環境」跟「正式環境」在 Docker 設定上的差異。',
+          hint: `學習環境 vs 正式環境常見差異：
+1. ddl-auto: update  →  validate + Flyway/Liquibase migration script
+2. 帳密寫在 docker-compose.yml →  Docker Secrets / 外部 Vault / CI 注入環境變數
+3. 沒有 healthcheck        →  幫 mysql/app 服務都加上 healthcheck，搭配 depends_on.condition: service_healthy
+4. 單一台機器跑 docker compose →  正式環境通常是 Kubernetes / ECS 等編排平台做多節點部署與自動擴縮`,
+        },
+      ],
+    },
+    {
+      id: 'final-stage-testing',
+      phase: 'testing',
+      title: 'Stage 4：重新審視 ShortLinkServiceTest，並練習補一個 Controller 層測試',
+      intro: '17. 自動化測試 已經帶你寫過 ShortLinkServiceTest（純 Mockito 單元測試）。這個 Stage 補齊「分層測試」的另外兩塊拼圖：Controller 層的 @WebMvcTest，以及回頭講清楚三種測試的分工。',
+      steps: [
+        {
+          id: 'final-testing-recap',
+          title: '口頭複習：ShortLinkServiceTest 到底在保護哪一段邏輯',
+          instruction: '不看程式碼，試著自己講出 generateUniqueCode() 的「碰撞就重試」邏輯是什麼、為什麼這段值得被單獨測試（它是少數有 if/while 判斷的商業邏輯，而不是單純的資料存取）。',
+          checkpoint: '你能講出：如果沒有這個單元測試，之後有人「好心」把 while 迴圈改成 if（只重試一次），這個單元測試會立刻抓到測試失敗，而不用等到正式環境真的發生代碼碰撞才發現 bug。',
+        },
+        {
+          id: 'final-testing-webmvc',
+          title: '練習寫一個 @WebMvcTest(ShortLinkController.class)',
+          instruction: '仿照 17. 自動化測試 教材裡 CommentController 的 @WebMvcTest 寫法，幫 ShortLinkController 補一個切片測試：驗證 POST /api/links 帶不合法網址時回 400，GET /api/links/{code} 查不存在的代碼回 404。這個測試層級跟 Stage 1 寫的單元測試不一樣：這裡要連 HTTP 狀態碼、JSON 回應格式都測到，但 Service 用 @MockitoBean 假物件取代，不會真的碰資料庫。',
+          checkpoint: '測試檔案能透過 mvn test -Dtest=ShortLinkControllerTest 執行成功，且至少包含「驗證失敗回 400」跟「找不到資源回 404」兩個案例。',
+          hint: `@WebMvcTest(ShortLinkController.class)
+class ShortLinkControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private ShortLinkService shortLinkService;
+
+    @Test
+    void create_withInvalidUrl_returns400() throws Exception {
+        mockMvc.perform(post("/api/links")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\\"targetUrl\\":\\"不是網址\\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getByCode_whenNotFound_returns404() throws Exception {
+        when(shortLinkService.findByCode("no-such-code")).thenThrow(new NoSuchElementException());
+
+        mockMvc.perform(get("/api/links/no-such-code"))
+            .andExpect(status().isNotFound());
+    }
+}`,
+        },
+        {
+          id: 'final-testing-pyramid',
+          title: '用「測試金字塔」總結這四層測試的分工',
+          instruction: '練習畫出或口頭描述測試金字塔：最底層（數量最多、最快）是純 Mockito 單元測試；中間層是 @WebMvcTest / @DataJpaTest 這種切片測試；最上層（數量最少、最慢、最接近真實）是 Testcontainers 整合測試 / 瀏覽器端的 verify-xxx-crud 驗收測試。',
+          checkpoint: '你能講出為什麼金字塔要「底寬頂窄」：單元測試快、便宜、該多寫；整合測試慢、貴（真的要啟動容器），只在真正需要驗證「跨元件真的兜得起來」時才寫，不然每次改一行程式碼都要等好幾分鐘才能知道測試過不過，開發體驗會很差。',
+          hint: `        ▲  少量：Testcontainers / 瀏覽器端 verify-xxx-crud
+       ╱ ╲    （慢、真實、涵蓋整條路徑）
+      ╱   ╲
+     ╱─────╲  中量：@WebMvcTest / @DataJpaTest
+    ╱       ╲   （中等速度，只載入一層）
+   ╱─────────╲
+  ╱           ╲ 大量：純 Mockito 單元測試
+ ╱─────────────╲  （毫秒等級，測邏輯本身）`,
+        },
+      ],
+    },
+  ],
+  interviewQuestions: [
+    {
+      question: '請帶我導覽一次：使用者在畫面上點擊「建立短網址」之後，到資料真的存進資料庫，中間經過哪些元件？',
+      answerHint:
+        '這題就是在考「你是否真的理解自己寫的系統」，標準答案要依序提到：① React 的 onClick/onSubmit 觸發 state 更新與 fetch(POST)；② Controller 接收請求並做 @Valid 驗證；③ Service 執行商業邏輯（產生唯一代碼、處理碰撞重試）；④ Repository 透過 Spring Data JPA 把 Entity 存進資料庫；⑤ Hibernate 依照目前的 Profile 設定，產生對應方言（H2/MySQL/PostgreSQL）的 SQL；⑥ Controller 回傳 201 跟新建立的物件；⑦ React 收到回應後更新前端的 state，畫面重新渲染出新的一筆。',
+    },
+    {
+      question: '如果我現在把後端的資料庫從 H2 換成 MySQL，你前端的程式碼需要改嗎？為什麼？',
+      answerHint:
+        '完全不用改。因為前端只透過固定的 REST API 合約（固定的 URL、固定的 JSON 格式）跟後端溝通，根本不知道後端背後接的是哪種資料庫。這正是分層架構「關注點分離」的價值：前端只依賴「API 合約」這個穩定的介面，後端內部實作（換資料庫、換驗證規則細節）的變動，不會波及前端。',
+    },
+    {
+      question: '你怎麼確保這支短網址服務「重構」的時候不會壞掉？',
+      answerHint:
+        '靠分層測試金字塔：改 Service 裡的邏輯，跑 ShortLinkServiceTest（毫秒等級，立刻知道商業邏輯有沒有壞）；改 Controller 的 HTTP 處理，跑 @WebMvcTest；真的要確認整條路徑在正式資料庫上行為一致，才跑 Testcontainers 整合測試。平常開發時只需要跑最快的那一層，省下大量等待時間，又能保有信心。',
+    },
+    {
+      question: '這整套（JSX + Spring Boot + Docker + 測試）如果要接上 CI/CD，你會怎麼設計 Pipeline？',
+      answerHint:
+        '典型流程：① 開發者 push 程式碼到 Git；② CI 先跑 mvn test（排除需要 Docker 的 Testcontainers 測試，用 -Dtest=\'!*IntegrationTest\' 這類排除語法）確保基本邏輯沒壞；③ 如果 CI 環境本身支援 Docker-in-Docker，可以再跑一輪包含 Testcontainers 的完整測試；④ 測試通過後用 Dockerfile 建置映像檔，推到映像檔倉庫（Docker Hub / 私有 Registry）；⑤ CD 階段把新映像檔部署到正式環境（可能搭配 docker compose pull && up -d，或更進階的 Kubernetes rolling update）。這一題的重點是展現「測試金字塔」跟「容器化」怎麼在真實流程裡銜接在一起，而不是各自獨立的知識點。',
+    },
+    {
+      question: '如果你只有 15 分鐘準備這個系統的面試導覽，你會優先講哪三件事？',
+      answerHint:
+        '沒有標準答案，但建議的順序通常是：① 先講「為什麼分層」（展現架構思維，而不是只會寫 CRUD）；② 挑一個「有值得講的商業邏輯」的地方深入（例如代碼碰撞重試），展現你不是只會照抄範例；③ 主動提「如果要上線還缺什麼」（migration 工具、healthcheck、CI/CD），展現你知道教材範例跟正式環境的差距在哪裡——這通常比單純「把所有功能都講過一遍」更容易讓面試官留下深刻印象。',
     },
   ],
 }
