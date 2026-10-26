@@ -3799,9 +3799,7 @@ export default function MyExpenseTracker() {
     apiContract: [
       'POST /api/auth/register -> 201，註冊（username 不可重複，密碼會被雜湊後存）；重複 username 回 400',
       'POST /api/auth/login    -> 200，登入成功回傳 { token }；帳密錯誤回 401',
-      'GET  /api/auth/me       -> 200，需帶 Authorization: Bearer <token>；沒帶或 token 無效回 401',
-    ],
-    conceptExplanation: [
+      'GET  /apconceptExplanation: [
       '先用生活比喻理解，再看程式碼會輕鬆很多：JWT token 就像一張「有防偽簽章的識別證」。你去警衛室（login）證明身分後，警衛（後端）發給你一張識別證（token），上面寫著你的名字，還蓋了一個只有警衛室才做得出來的防偽章（簽章）。之後你想進任何房間（受保護的 API），只要出示這張識別證，警衛掃一下防偽章確認沒被偽造、也還沒過期，就放行——警衛完全不需要記得「誰進來過」，這就是「無狀態（stateless）」的意思。',
       '整個練習其實只有 3 個角色在合作：AuthController/AuthService（負責「核發識別證」：註冊、登入）、JwtUtil（負責「做出防偽章」與「驗證防偽章」：產生/解析 token）、JwtAuthFilter + SecurityConfig（負責「站在每個房間門口的警衛」：每個請求進來前先檢查有沒有帶識別證，帶了就放行）。新手常卡住的地方，就是分不清楚這三者各自的職責邊界，下面用流程圖把「誰在什麼時間點做什麼事」畫出來。',
       '特別提醒 Stage 3 的兩個常見地雷：① JwtAuthFilter 沒有加 @Component，Spring 就不會把它當成 Bean，SecurityConfig 會直接啟動失敗（報錯 required a bean of type JwtAuthFilter that could not be found）。② 沒有自訂 AuthenticationEntryPoint 的話，「沒帶 token / token 失效」預設會回 403，而不是 apiContract 要求的 401——因為 Spring Security 在沒有 httpBasic()/formLogin() 的情況下，找不到「該怎麼引導使用者登入」，只好用最保守的 403 打發，所以要自己指定一個 entry point 直接回 401。',
@@ -5916,6 +5914,17 @@ docker ps
 #   Host name/address: postgres   ← 用服務名稱，不是 localhost！
 #   Port: 5432
 #   Username: learner / Password: learn123`,
+              troubleshooting: [
+                {
+                  issue:
+                    'Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:5432 -> 127.0.0.1:0 ... bind: An attempt was made to access a socket in a way forbidden by its access permissions.',
+                  fix: '這是 Windows 層級的 port 綁定被拒絕，不是 PostgreSQL 或 Docker 本身壞掉。最常見原因是 Windows 把 5432 劃進了 Hyper-V/WSL2 的「動態排除 port 範圍」。排查步驟：① 用系統管理員身分打開 PowerShell，執行 netsh interface ipv4 show excludedportrange protocol=tcp，看輸出裡有沒有一段範圍剛好包含 5432；② 如果有，執行 net stop winnat 再 net start winnat 讓 Windows 重新配置排除範圍（這組指令需要系統管理員權限），完成後重跑 docker compose --profile postgres up -d；③ 也要順便確認你電腦是不是本來就裝了一套「本機安裝版」的 PostgreSQL 服務佔用了 5432（執行 Get-Service | Where-Object {$_.DisplayName -like "*postgresql*"}），有的話先停用該服務。如果以上都排查過還是不行，最快的繞過方式是把 docker-compose.yml 裡 postgres 服務的 ports 改成不同的主機 port（例如 "5433:5432"，容器內部仍是 5432 不用動），同時要把 application-postgres.properties 的連線字串從 jdbc:postgresql://localhost:5432/learning_lab 改成 jdbc:postgresql://localhost:5433/learning_lab，兩邊同步改掉即可正常使用。',
+                },
+                {
+                  issue: 'docker ps 看不到 react-learning-postgres，或 STATUS 一直是 Restarting',
+                  fix: '跟 MySQL 練習一樣，先用 docker compose --profile postgres logs postgres 看實際錯誤訊息；多半也是 port 被佔用（5432 或 5050 其中之一），用 netstat -ano | findstr 5432 / findstr 5050 確認。',
+                },
+              ],
             },
           ],
         },

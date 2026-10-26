@@ -72,5 +72,10 @@ class ShortLinkServiceTest {
         assertThat(entity.getClicks()).isEqualTo(1L); // 商業邏輯：每解析一次就 +1
         verify(shortLinkRepository).save(entity);
     }
+
+    @Test
+    void sanityCheck_environmentIsWorking() {
+        assertThat(1 + 1).isEqualTo(2);
+    }
 }
 
